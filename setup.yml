@@ -1,4 +1,4 @@
-name: opx-env2
+name: dissipator-code-env
 channels:
   - conda-forge
   - anaconda

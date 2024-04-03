@@ -13,10 +13,10 @@ import instrument_init as inst
 import os
 import pandas as pd
 
-device = 'diss09_6024'
+device = 'darpa2A'
 qb = dissipator(device, device_name=device)
-qb.update_value('rr_freq', 6.025337e9)
-qb.update_value('rr_LO', 5.975e9)
+qb.update_value('rr_freq', 6.46e9)
+qb.update_value('rr_LO', 6.3e9)
 qb.update_value('rr_IF', qb.pars['rr_freq'] -qb.pars['rr_LO'] )
 qb.update_value('rr_atten', 30)
 qb.update_value('diss_freq', 7.97e9)

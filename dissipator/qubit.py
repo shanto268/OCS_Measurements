@@ -31,13 +31,13 @@ import warnings
 import matplotlib.pyplot as plt
 from sequence import *
 
-host='10.71.0.56'
+host='10.71.0.57'
 port='9510'
 logger.setLevel(level='WARNING')
-device = 'diss08_11a'
+device = 'darpa2A'
 today = date.today()
 sDate =  today.strftime("%Y%m%d")
-saveDir = f'G:\\Shared drives\\CavityCooling\\data\\{device}\\{sDate}'
+saveDir = f'G:\\Shared drives\\CavityCooling\\DARPA\\data\\{device}\\{sDate}'
 class qubit():
 #%% INITIALIZATION
 
@@ -59,7 +59,7 @@ class qubit():
                     "amp_q":                        0.35,
                     "gauss_len":                    48,
                     "gauss_amp":                    0.45,
-                    
+                    "n_avg":                        500,
                     "diss_LO":                     int(12.2e9),
                     "diss_freq":                   int(12.281e9),
                     "qubit12_IF":                     int(80e6),
@@ -76,8 +76,8 @@ class qubit():
                     "amp_r":                        0.35,
                     'rr_atten':                     25,
                     "tof":                          280, # time of flight in ns
-                    "rr_pulse_len_in_clk":          5000, # length of readout integration weights in clock cycles
-                    "rr_pulse_len_in_clk_diss":     25,
+                    "readout_length":          1000, # length of readout integration weights in clock cycles
+                    "readout_length_diss":     25,
                     "IQ_rotation":                  -0/180*np.pi, # phase rotation applied to IQ data
                     "analog_input_offsets":         [0,0],
                     "qubit_resettime":              400e3,
@@ -404,7 +404,7 @@ class qubit():
 
         self.update_value('rr_LO', value = f_LO)
         inst.set_rr_LO(self.pars['rr_LO'])
-        rr_pulse_len_in_clk = self.pars['rr_pulse_len_in_clk']
+        readout_length = self.pars['readout_length']
             
             
         seq = sequence('rr_spec',n_avg=n_avg, IF_min=IF_min, IF_max=IF_max, df=df,)
@@ -1624,11 +1624,11 @@ class qubit():
         with program() as tof_cal:
             n = declare(int)
             adc_st = declare_stream(adc_trace=True)
-            update_frequency('rr',10e6)
-            with for_(n, 0, n < 1000, n + 1):
+            update_frequency('rr',self.pars['rr_IF'])
+            with for_(n, 0, n < self.pars['n_avg'], n + 1):
                 reset_phase("rr")
                 measure("readout", "rr", adc_st)
-                wait(50000, "rr")
+                wait(self.pars['tof'], "rr")
             with stream_processing():
                 adc_st.input1().average().save("adc1")
                 adc_st.input2().average().save("adc2")
@@ -2264,8 +2264,8 @@ class qubit():
 
         inst.set_qb_LO(self.pars['qubit_LO'])
         inst.set_rr_LO(self.pars['rr_LO'])
-        inst.set_ffl_LO(self.pars['ffl_LO'])
-        inst.set_fflqc_LO(self.pars['fflqc_LO'])
+        # inst.set_ffl_LO(self.pars['ffl_LO'])
+        # inst.set_fflqc_LO(self.pars['fflqc_LO'])
         inst.set_attenuator(self.pars['rr_atten'])
 
 
@@ -2316,7 +2316,7 @@ class qubit():
             "version": 1,
 
             "controllers": {
-                "con1": {
+                "con2": {
                     "type": "opx1",
                     "analog_outputs": {
                         1: {"offset": pars['rr_mixer_offsets'][0]},  # qubit I
@@ -2341,8 +2341,8 @@ class qubit():
             "elements": {
                 "qubit": {
                     "mixInputs": {
-                        "I": ("con1", 3),
-                        "Q": ("con1", 4),
+                        "I": ("con2", 3),
+                        "Q": ("con2", 4),
                         "lo_frequency": pars['qubit_LO'],
                         "mixer": "qubit",
                     },
@@ -2361,76 +2361,76 @@ class qubit():
                         "Y/2": "Ypi_half_pulse",
                     },
                 },
-                "qubit12": {
-                    "mixInputs": {
-                        "I": ("con1", 7),
-                        "Q": ("con1", 8),
-                        "lo_frequency": pars['qubit_LO'],
-                        "mixer": "qubit12",
-                    },
-                    "intermediate_frequency": pars['qubit12_IF'],
-                    "digitalInputs": {},
-                    "operations": {
-                        "const": "const_pulse_IQ",
-                        "pi": "pi_pulse12" ,
-                    },
-                },
+                # "qubit12": {
+                #     "mixInputs": {
+                #         "I": ("con2", 7),
+                #         "Q": ("con1", 8),
+                #         "lo_frequency": pars['qubit_LO'],
+                #         "mixer": "qubit12",
+                #     },
+                #     "intermediate_frequency": pars['qubit12_IF'],
+                #     "digitalInputs": {},
+                #     "operations": {
+                #         "const": "const_pulse_IQ",
+                #         "pi": "pi_pulse12" ,
+                #     },
+                # },
                 "rr": {
                     "mixInputs": {
-                        "I": ("con1", 1),
-                        "Q": ("con1", 2),
+                        "I": ("con2", 1),
+                        "Q": ("con2", 2),
                         "lo_frequency": pars['rr_LO'],
                         "mixer": "rr",
                     },
                     "intermediate_frequency": pars['rr_IF'],
                     "outputs": {
-                        "out1": ("con1", 1),
-                        "out2": ("con1", 2),
+                        "out1": ("con2", 1),
+                        "out2": ("con2", 2),
                     },
                     "time_of_flight": pars['tof'], # should be multiple of 4 (at least 24)
                     "smearing": 40, # adds 40ns of data from each side of raw adc trace to account for ramp up and down of readout pulse
                     "operations": {
                         "const": "const_pulse_IQ_rr",
                         "readout": "ro_pulse1",
-                        "readout_diss": "ro_pulse1_diss",
+                        # "readout_diss": "ro_pulse1_diss",
                         "void": "ro_pulse_void",
                         'ro_pulse_control': "ro_pulse_control",
                     },
                 },
-                "ffl": {
-                    "mixInputs": {
-                        "I": ("con1", 5),
-                        "Q": ("con1", 6),
-                        "lo_frequency": pars['ffl_LO'],
-                        "mixer": "ffl",
-                    },
-                    "intermediate_frequency": pars['ffl_IF'],
-                    "operations": {
-                        "const":"const_pulse_IQ_ffl",
-                        "null":"zero_pulse_IQ_ffl",
-                        "offset": "offset_pulse_IQ_ffl",
-                        "gaussian": "gaussian_pulse_ffl",
-                        "rise": "rise_pulse_IQ_ffl",
-                        "fall": "fall_pulse_IQ_ffl"
-                    },
-                },
-                "fflqc": {
-                    "mixInputs": {
-                        "I": ("con1", 7),
-                        "Q": ("con1", 8),
-                        "lo_frequency": pars['fflqc_LO'],
-                        "mixer": "fflqc",
-                    },
-                    "intermediate_frequency": pars['fflqc_IF'],
-                    "digitalInputs": {},
-                    "operations": {
-                        "const":"const_pulse_IQ_ffl",
-                        "null":"zero_pulse_IQ_ffl",
-                        "offset": "offset_pulse_IQ_ffl",
-                        "gaussian": "gaussian_pulse_ffl",
+                # "ffl": {
+                #     "mixInputs": {
+                #         "I": ("con1", 5),
+                #         "Q": ("con1", 6),
+                #         "lo_frequency": pars['ffl_LO'],
+                #         "mixer": "ffl",
+                #     },
+                #     "intermediate_frequency": pars['ffl_IF'],
+                #     "operations": {
+                #         "const":"const_pulse_IQ_ffl",
+                #         "null":"zero_pulse_IQ_ffl",
+                #         "offset": "offset_pulse_IQ_ffl",
+                #         "gaussian": "gaussian_pulse_ffl",
+                #         "rise": "rise_pulse_IQ_ffl",
+                #         "fall": "fall_pulse_IQ_ffl"
+                #     },
+                # },
+                # "fflqc": {
+                #     "mixInputs": {
+                #         "I": ("con1", 7),
+                #         "Q": ("con1", 8),
+                #         "lo_frequency": pars['fflqc_LO'],
+                #         "mixer": "fflqc",
+                #     },
+                #     "intermediate_frequency": pars['fflqc_IF'],
+                #     "digitalInputs": {},
+                #     "operations": {
+                #         "const":"const_pulse_IQ_ffl",
+                #         "null":"zero_pulse_IQ_ffl",
+                #         "offset": "offset_pulse_IQ_ffl",
+                #         "gaussian": "gaussian_pulse_ffl",
                     
-                    },
-                },
+                #     },
+                # },
                 
             },
 
@@ -2574,7 +2574,7 @@ class qubit():
                 },
                 "ro_pulse1": {
                     "operation": "measurement",
-                    "length": pars['rr_pulse_len_in_clk'] *4, # in ns (needs to be multiple of 4)
+                    "length": pars['readout_length'], # in ns (needs to be multiple of 4)
                     "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
                     "integration_weights": {
                         "integW_cos": "integW1_cos",
@@ -2584,17 +2584,17 @@ class qubit():
                     "digital_marker": "ON",
                 },
                 
-                "ro_pulse1_diss": {
-                    "operation": "measurement",
-                    "length": pars['rr_pulse_len_in_clk_diss'] *4, # in ns (needs to be multiple of 4)
-                    "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
-                    "integration_weights": {
-                        "integW_cos_diss": "integW1_cos_diss",
-                        "integW_sin_diss": "integW1_sin_diss",
-                        "integW_minus_sin_diss": "integW1_minus_sin_diss"
-                    },
-                    "digital_marker": "ON",
-                },
+                # "ro_pulse1_diss": {
+                #     "operation": "measurement",
+                #     "length": pars['readout_length_diss'] , # in ns (needs to be multiple of 4)
+                #     "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
+                #     "integration_weights": {
+                #         "integW_cos_diss": "integW1_cos_diss",
+                #         "integW_sin_diss": "integW1_sin_diss",
+                #         "integW_minus_sin_diss": "integW1_minus_sin_diss"
+                #     },
+                #     "digital_marker": "ON",
+                # },
                 
                 
                 "ro_pulse_control": {
@@ -2653,55 +2653,55 @@ class qubit():
 
             "integration_weights": {
                 "integW1_cos": {
-                    "cosine": [(np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
-                    "sine": [(-np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
+                    "cosine": [(np.cos(pars['IQ_rotation']) , pars['readout_length'])],
+                    "sine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length'])],
                 },
                 "integW1_sin": {
-                    "cosine": [(np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
-                    "sine": [(np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
+                    "cosine": [(np.sin(pars['IQ_rotation']) , pars['readout_length'])],
+                    "sine": [(np.cos(pars['IQ_rotation']) , pars['readout_length'])],
                 },
                 "integW1_minus_sin": {
-                    "cosine": [(-np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
-                    "sine": [(-np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk']*4)],
+                    "cosine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length'])],
+                    "sine": [(-np.cos(pars['IQ_rotation']) , pars['readout_length'])],
                 },
                 
-                "integW1_cos_diss": {
-                    "cosine": [(np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                    "sine": [(-np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                },
-                "integW1_sin_diss": {
-                    "cosine": [(np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                    "sine": [(np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                },
-                "integW1_minus_sin_diss": {
-                    "cosine": [(-np.sin(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                    "sine": [(-np.cos(pars['IQ_rotation']) , pars['rr_pulse_len_in_clk_diss']*4)],
-                },
+                # "integW1_cos_diss": {
+                #     "cosine": [(np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                #     "sine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                # },
+                # "integW1_sin_diss": {
+                #     "cosine": [(np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                #     "sine": [(np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                # },
+                # "integW1_minus_sin_diss": {
+                #     "cosine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                #     "sine": [(-np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
+                # },
                 
                 "integW2_cos": {
-                    "cosine": [1.0] * pars['rr_pulse_len_in_clk'],
-                    "sine": [0.0] * pars['rr_pulse_len_in_clk'],
+                    "cosine": [1.0] * pars['readout_length'],
+                    "sine": [0.0] * pars['readout_length'],
                 },
                 "integW2_sin": {
-                    "cosine": [0.0] * pars['rr_pulse_len_in_clk'],
-                    "sine": [1.0] * pars['rr_pulse_len_in_clk'],
+                    "cosine": [0.0] * pars['readout_length'],
+                    "sine": [1.0] * pars['readout_length'],
                 },
                 "integW2_minus_sin": {
-                    "cosine": [0.0] * pars['rr_pulse_len_in_clk'],
-                    "sine": [-1.0] * pars['rr_pulse_len_in_clk'],
+                    "cosine": [0.0] * pars['readout_length'],
+                    "sine": [-1.0] * pars['readout_length'],
                 },
-                "integW2_cos_diss": {
-                    "cosine": [1.0] * pars['rr_pulse_len_in_clk_diss'],
-                    "sine": [0.0] * pars['rr_pulse_len_in_clk_diss'],
-                },
-                "integW2_sin_diss": {
-                    "cosine": [0.0] * pars['rr_pulse_len_in_clk_diss'],
-                    "sine": [1.0] * pars['rr_pulse_len_in_clk_diss'],
-                },
-                "integW2_minus_sin_diss": {
-                    "cosine": [0.0] * pars['rr_pulse_len_in_clk_diss'],
-                    "sine": [-1.0] * pars['rr_pulse_len_in_clk_diss'],
-                    },
+                # "integW2_cos_diss": {
+                #     "cosine": [1.0] * pars['readout_length_diss'],
+                #     "sine": [0.0] * pars['readout_length_diss'],
+                # },
+                # "integW2_sin_diss": {
+                #     "cosine": [0.0] * pars['readout_length_diss'],
+                #     "sine": [1.0] * pars['readout_length_diss'],
+                # },
+                # "integW2_minus_sin_diss": {
+                #     "cosine": [0.0] * pars['readout_length_diss'],
+                #     "sine": [-1.0] * pars['readout_length_diss'],
+                #     },
             },
 
             "mixers": {

@@ -14,7 +14,7 @@ import timeit
 class dissipator(qubit):
     
     def __init__(self, qb,device_name):
-        qubit.__init__(self, qb)
+        super.__init__(self, qb)
         self.device_name = device_name
         
     def optimize_mixer(self,sa, element='rr', cal='LO', switch='on'):

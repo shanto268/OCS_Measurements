@@ -18,16 +18,17 @@ import time
 client = Labber.connectToServer()
 # qmm = QuantumMachinesManager()
 # qm = qmm.open_qm(config)
-qubit_LO_model = 'SignalCore SC5511A Signal Generator'
-qubit_LO_name = '10002F1D' 
-qubit_LO_quantity_name = {'freq':'Frequency',
-                          'power': 'Power',
-                          'output': 'Output status'}
+qubit_LO_model = 'SignalCore SC5506A Signal Generator'
+qubit_LO_name = '10002A08' 
+qubit_LO_quantity_name = {'freq': 'RF1 frequency',
+                       'power': 'RF1 power level',
+                       'output':'RF1 output status'}
 
-rr_LO_model = 'SignalCore SC5511A Signal Generator'
-rr_LO_name = '10002A06'
-rr_LO_quantity_name = {'freq': 'Frequency',
-                       'output':'Output status'}
+rr_LO_model = 'BNC 845 Signal Generator'
+rr_LO_name = 'readout LO'
+rr_LO_quantity_name = {'freq':'Frequency',
+                          'power': 'Power',
+                          'output': 'Output'}
 
 fflqc_LO_model = 'SignalCore SC5506A Signal Generator'
 fflqc_LO_name = '10002A07'
@@ -238,14 +239,14 @@ def turn_qb_LO_off():
 def set_attenuator(attenuation):
     # initialize digital attenuator
     # attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='24679'))
-    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='26551'))
+    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='usb',address='24680'))
     attn.startInstrument()
     attn.setValue('Attenuation',attenuation)
 
 def get_attenuation():
     # initialize digital attenuator
     # attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='24679'))
-    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='26551'))
+    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='usb',address='24680'))
     attn.startInstrument()
     return attn.getValue('Attenuation')
 

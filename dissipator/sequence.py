@@ -10,7 +10,7 @@ from qm import LoopbackInterface
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
 import instrument_init as inst
-from dissipator import *
+# from dissipator import *
 from Utilities import clk
 host='10.71.0.56'
 port='9510'
