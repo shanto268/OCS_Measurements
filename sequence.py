@@ -4,25 +4,24 @@ Created on Fri Apr 28 13:00:18 2023
 
 @author: lfl
 """
-from qm import generate_qua_script
 from qm.qua import *
+from qualang_tools.loops import from_array
 from qm import LoopbackInterface
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
-import instrument_init as inst
 import numpy as np
-# from dissipator import *
 from Utilities import clk
-host='10.71.0.56'
-port='9510'
+from helper_functions import res_demod, declare_vars, declare_streams
+
 
 class sequence():
     
     # def __init__(self, name, n_avg=100, amp_r_scale=1, amp_ffl_scale=1, **kwargs):
     def __init__(self,qb,name,**kwargs):
         self.name = name
-        self.seq_pars = qb.seq_pars
+        # self.seq_pars = qb.seq_pars
         self.qb_pars = qb.pars
+        self.seq_pars = {}
         # self.exp_dict = {'n_avg': n_avg,
         #                  'amp_r_scale': amp_r_scale,
         #                  'amp_ffl_scale': amp_ffl_scale}
@@ -33,37 +32,41 @@ class sequence():
     # def make_sequence(self, qb, tmin = 16, tmax=1e3, dt=8, scrambling_amp=0., ffl_len=2e3, saturation_dur=2e3, with_ffl='True', with_scram='True', detuning=0):
         
 
-    def make_resonator_spec_sequence(self,saturation_dur=2e3,):
-        n_avg = self.seq_pars['n_avg']
+    def make_resonator_spec_sequence(self):
+        
+        n_avg = self.qb_pars['n_avg']
         IF_min = self.seq_pars['IF_min']
         IF_max = self.seq_pars['IF_max']
         df = self.seq_pars['df']
-        freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
-        rr_pulse_len_in_clk = self.seq_pars['readout_length']
-        res_ringdown_time = clk(self.seq_pars['rr_resettime'])
+        on_off = self.seq_pars['on_off']
+        freqs = np.arange(IF_min, IF_max + df, df, dtype=int)
+        res_ringdown_time = self.qb_pars['resettime']['rr']
+        print(res_ringdown_time)
         ### QUA code ###
         with program() as prog:
+            n, I, Q, f = declare_vars([int, fixed, fixed, int])
+            I_st, Q_st, n_stream = declare_streams(stream_num=3)
+            if on_off:
+                I_b, Q_b, I_tot,Q_tot = declare_vars([fixed,fixed, fixed, fixed])
+            # n = declare(int)
+            # I = declare(fixed)
+            # I_st = declare_stream()
+            # Q = declare(fixed)
+            # Q_st = declare_stream()
+            # f = declare(int)
+            # n_stream = declare_stream()
             
-            n = declare(int)
-            I = declare(fixed)
-            I_st = declare_stream()
-            Q = declare(fixed)
-            Q_st = declare_stream()
-            f = declare(int)
-            n_stream = declare_stream()
-
             with for_(n, 0, n < n_avg, n + 1):
-
+                save(n,n_stream)
+                reset_frame('rr')
                 # with for_each_(f, freqs_list):
-                with for_(f, IF_min, f < IF_max + df/2, f + df):
+                with for_(*from_array(f, freqs)):
                     update_frequency("rr", f)
                     wait(res_ringdown_time, "rr")
-            
-                    measure("readout", "rr", None,*qb.res_demod(I, Q,switch_weights=False))
+                    measure("readout", "rr", None,*res_demod(I, Q,switch_weights=False))
                     save(I, I_st)
                     save(Q, Q_st)
 
-                save(n,n_stream)
 
             with stream_processing():
                 I_st.buffer(len(freqs)).average().save('I')
@@ -72,40 +75,50 @@ class sequence():
 
         return prog
                     
-           
-    
-    def make_qubit_spec_sequence():
-        resettime_clk= clk(qb.pars['qubit_resettime'])
-        n_avg = self.exp_dict['n_avg']
-        IF_min = self.exp_dict['IF_min']
-        IF_max = self.exp_dict['IF_max']
-        df = self.exp_dict['df']
-        amp_ffl_scale = self.exp_dict['amp_ffl_scale']
+    def make_qubit_spec_sequence(self,):
+        n_avg = self.qb_pars['n_avg']
+        IF_min = self.seq_pars['IF_min']
+        IF_max = self.seq_pars['IF_max']
+        df = self.seq_pars['df']
+        qubit_amp = self.seq_pars['amp_q_scaling']
+        saturation_dur = self.seq_pars['saturation_dur']
+        on_off = self.seq_pars['on_off']
+        # amp_ffl_scale = self.exp_dict['amp_ffl_scale']
         freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
-        rr_pulse_len_in_clk = qb.pars['qb_resettime']
+        qubit_reset_time = self.qb_pars['resettime']['qubit']
+        rr_reset_time = self.qb_pars['resettime']['rr']
+
         with program() as prog:
-            update_frequency('rr', qb.pars['rr_IF'])
-            update_frequency('qubit', (qb.pars['qubit_freq']-qb.pars['qubit_LO']))
-            update_frequency('ffl', (qb.pars['ffl_freq']-qb.pars['ffl_LO'])) 
-            n, I, Q = qb.declare_vars([int, fixed, fixed])
-            
-            I_stream, Q_stream, n_stream = qb.declare_streams(stream_num=3)
+            # update_frequency('rr', self.qb_pars['rr_IF'])
+            n, I, Q = declare_vars([int, fixed, fixed])
+            I_stream, Q_stream, n_stream = declare_streams(stream_num=3)
+            if on_off:
+                I_b, Q_b, I_tot,Q_tot = declare_vars([fixed,fixed, fixed, fixed])
+
             f = declare(int)
             
             with for_(n, 0, n < n_avg, n + 1):
                 save(n, n_stream)
-                with for_(f, IF_min, f < IF_max + df/2, f + df):
-                    update_frequency("fflqc", f)
-                    wait(resettime_clk)
-                    #align("qubit","rr")
-                    play("pi", "qubit")
-                    align("fflqc", "rr")
-                    play('const'*amp(amp_ffl_scale), "ffl", duration=750)
-                    align("fflqc", "rr")
-                    measure("readout", "rr", None, *qb.res_demod(I, Q))
-                    
-                    save(I, I_stream)
-                    save(Q, Q_stream)
+                with for_(*from_array(f, freqs)):
+                    update_frequency("qubit", f)
+                    # measure background
+                    if on_off:
+                        measure("readout", "rr", None, *res_demod(I_b, Q_b,switch_weights=True))
+                        wait(rr_reset_time, "rr")
+                        align("rr", "qubit") # wait for operations on resonator to finish before playing qubit pulse
+
+                    play('const'*amp(qubit_amp), "qubit", duration=saturation_dur)
+                    align("qubit", "rr")
+                    measure("readout", "rr", None, *res_demod(I, Q,switch_weights=True))
+                    wait(qubit_reset_time,'qubit')
+                    if on_off:
+                        assign(I_tot, I - I_b)
+                        assign(Q_tot, Q - Q_b)
+                        save(I_tot, I_stream)
+                        save(Q_tot, Q_stream)
+                    else:
+                        save(I, I_stream)
+                        save(Q, Q_stream)
         
             with stream_processing():
                 I_stream.buffer(len(freqs)).average().save('I')

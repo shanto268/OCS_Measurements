@@ -23,6 +23,7 @@ from types import SimpleNamespace
 pi=np.pi
 import seaborn as sns; sns.set() # styling
 from matplotlib.ticker import FormatStrFormatter
+from Utilities import convert_V_to_dBm
 from scipy.signal import butter,lfilter,freqz,find_peaks,peak_widths
 # import imageio
 
@@ -56,120 +57,112 @@ def power_plot(freqs,signal,power,fc):
     plt.show()
 
 #%% tof_plot
-def tof_plot(adc1,adc2):
+def tof_plot(adc1,adc2,delay=0,offsets=[0,0]):
     plt.figure()
     plt.title('time-of-flight calibration analysis')
     plt.plot(adc1)
+    plt.gcf().text(1, 0.15, f"Electrical delay: {delay}\nChannel 1 offset: {offsets[0]*1e3:.1f} mV\nChannel 2 offset: {offsets[1]*1e3:.1f} mV", fontsize=14)
     plt.plot(adc2)
     plt.legend(["adc1", "adc2"])
     plt.show()
 
 #%% spec_plot
-def spec_plot(freq,I,Q,attenuation=-30,df=0.1e6,plot='mag',element='resonator',fwhm=0,fc=0,qb_power=0,rr_power=0,rrFreq=0,iteration=1,find_peaks=False, amp_q_scaling=1, amp_cav_scaling=0.01,amp_ffl_scaling=0.01, flux=0,**kwargs):
-
-    freq = freq*1e-9
-    I = I*1e3
-    Q = Q*1e3
+def resonator_spec_plot(data,qb_pars,fwhm=0,fc=0,iteration=1,**kwargs):
+    freq = data['freqs']*1e-9
+    df = (freq[1]-freq[0])*1e9
+    I = data['I']*1e3
+    Q = data['Q']*1e3
     mag = np.abs(I+1j*Q)
     power=10*np.log10((10**-3)*(mag**2)/50)
 
     phase = np.unwrap(np.angle(I+1j*Q))
-    if element == 'qubit' and find_peaks:
-        sigma = np.std(mag)
-        print(f'Peak threshold at {np.mean(mag)+5*sigma}')
-        peaks,_ = scy.signal.find_peaks(mag,height=np.mean(mag)+5*sigma,distance=200,width=3)
-        try:
-            for i in peaks:
-                print(f'Peaks at: {round(freq[i],5)} GHz\n')
-        except:
-            print('Peaks not found or do not exist.')
+    fig = plt.figure(figsize=(10,8))
 
-    fig = plt.figure(figsize=(8,8))
+# Power data
+    ax1 = fig.add_subplot(221)
+    ax1.plot(freq, mag, '-o', markersize=3, c='C0')
+    ax1.set_xlabel('Frequency (GHz)')
+    ax1.set_ylabel('Magnitude (mV)')
 
-    if element == 'qubit':
-        # I data
-        ax1 = fig.add_subplot(221)
-        ax1.plot(freq,I,'-o', markersize = 3, c='C0')
-        ax1.set_xlabel('Frequency (GHz)')
-        ax1.set_ylabel('I (mV)')
-        # Q data
-        ax1 = fig.add_subplot(222)
-        ax1.plot(freq,Q,'-o', markersize = 3, c='C0')
-        ax1.set_xlabel('Frequency (GHz)')
-        ax1.set_ylabel('Q (mV)')
-        # phase data
-        ax1 = fig.add_subplot(223)
-        ax1.plot(freq,phase,'-o', markersize = 3, c='C0')
-        ax1.set_xlabel('Frequency (GHz)')
-        ax1.set_ylabel('Phase (rad)')
-        
+    # Phase data
+    ax2 = fig.add_subplot(222)
+    ax2.plot(freq, phase, '-o', markersize=3, c='C0')
+    ax2.set_xlabel('Frequency (GHz)')
+    ax2.set_ylabel('Phase (deg)')
 
-    elif element == 'resonator' or 'ffl':
-        # Power data
-        ax1 = fig.add_subplot(221)
-        ax1.plot(freq, mag, '-o', markersize=3, c='C0')
-        if fc != 0 and fc != np.nan:
-            ax1.axvline(fc/1e9)
-        ax1.set_xlabel('Frequency (GHz)')
-        ax1.set_ylabel('Magnitude (mV)')
+    # Additional subplot on the bottom row
+    ax3 = fig.add_subplot(212)
+    ax3.plot(freq, I, '-o', markersize=3, c='r', label='I')
+    ax3.plot(freq,Q , '-o', markersize=3, c='b', label='Q')
+    ax3.set_xlabel('Frequency (GHz)')
+    ax3.set_ylabel('Voltage (mV)')
 
-        # Phase data
-        ax2 = fig.add_subplot(222)
-        ax2.plot(freq, phase, '-o', markersize=3, c='C0')
-        ax2.set_xlabel('Frequency (GHz)')
-        ax2.set_ylabel('Phase (deg)')
-
-        # Additional subplot on the bottom row
-        ax3 = fig.add_subplot(212)
-        ax3.plot(freq, I, '-o', markersize=3, c='r', label='I')
-        ax3.plot(freq,Q , '-o', markersize=3, c='b', label='Q')
-        if fc != 0 and fc != np.nan:
-            ax3.axvline(fc/1e9)
-        ax3.set_xlabel('Frequency (GHz)')
-        ax3.set_ylabel('Voltage (mV)')
-        # ax1 = fig.add_subplot(221)
-        # ax1.plot(freq,mag,'-o', markersize = 3, c='C0')
-        # if fc is not 0 and fc is not np.nan:
-        #     ax1.axvline(fc/1e9)
-        # ax1.set_xlabel('Frequency (GHz)')
-        # ax1.set_ylabel('S21 - Magnitude')
-        # ax2 = fig.add_subplot(212)
-        # ax2.plot(freq,phase,'-o', markersize = 3, c='C0')
-        # ax2.set_xlabel('Frequency (GHz)')
-        # ax2.set_ylabel('Phase (deg)')
-        # if 'lo_list' in kwargs.keys():
-        #     lo_list = kwargs.get('lo_list')
-        #     axes = fig.axes
-        #     for ax in axes: 
-        #         ymin, ymax = ax.get_ylim()
-        #         for lo in lo_list:
-        #             ax.vlines(x = lo/1e9,ymin=ymin, ymax=ymax, ls='--')
-
-    if element == 'resonator':
-        txt = f'$\omega_c$ = {fc*1e-9:.5f} GHz\nFWHM = {fwhm*1e-6:.3f} MHz\n$\kappa$ = {2*np.pi*fwhm*1e-6:.3f} MHz\nReadout attenuation: {attenuation} dB\ndf = {df*1e-3} kHz'
-        if 'flux' in kwargs.keys():
-            flux = kwargs.get('flux')
-            if flux is not None:
-                txt = f'flux = {flux*1e6:.0f} uA\n' + txt
-    elif element == 'qubit':
-        if len(peaks) == 2:
-            txt = '$\omega_{01}$ = %.4f GHz\n$\omega_{02}$/2 = %.4f GHz\n$\\alpha$ = %.1f MHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz'%(freq[peaks[1]],freq[peaks[0]],(freq[peaks[0]]-freq[peaks[1]])*1e3,qb_power,rr_power,rrFreq*1e-9)
-        elif len(peaks) == 1:
-            txt = '$\omega_{01}$ = %.4f GHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz'%(freq[peaks[0]], qb_power, rr_power, rrFreq*1e-9)
-        else:
-            txt = '$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz\n$amp_qscale$ = %.5f \n$amp_{cav}scale$= %.3f \n$amp_{ffl}scale$= %.3f'%(qb_power,rr_power,rrFreq*1e-9, amp_q_scaling, amp_cav_scaling, amp_ffl_scaling)
+    txt = f'$\omega_c$ = {fc*1e-9:.5f} GHz\nFWHM = {fwhm*1e-6:.3f} MHz\n$\kappa$ = {2*np.pi*fwhm*1e-6:.3f} MHz\nReadout attenuation: {qb_pars["readout_atten"]} dB\ndf = {df*1e-3:.1f} kHz'
     
-    elif element =='ffl':
-        if 'current' in kwargs:
-            current = round(kwargs.get('current')*1e6)
-        else:
-            current = 'N/A'
-        txt = f' flux: {flux} mA\nFFL attenuation: {attenuation} dB\ndf = {df*1e-3} kHz \nffl scale = {amp_ffl_scaling}'
     plt.gcf().text(1, 0.15, txt, fontsize=14)
     # fig.set_title(f'{element} spectroscopy {iteration}')
     plt.tight_layout()
-    plt.show()
-    return fig
+
+def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=True, amp_q_scaling=1,**kwargs):
+
+
+    freq = data['freqs']*1e-9
+    df = freq[1]-freq[0]
+    I = data['I']*1e3
+    Q = data['Q']*1e3
+    mag = np.abs(I+1j*Q)
+    power=convert_V_to_dBm(mag*1e-3)
+
+    phase = np.unwrap(np.angle(I+1j*Q))
+
+    sigma = np.std(mag)
+    print(f'Peak threshold at {np.mean(mag)+2*sigma}')
+    peaks,_ = scy.signal.find_peaks(mag,height=np.mean(mag)+2*sigma,distance=200,width=3)
+    try:
+        for i in peaks:
+            print(f'Peaks at: {round(freq[i],5)} GHz\n')
+    except:
+        print('Peaks not found or do not exist.')
+
+    fig = plt.figure(figsize=(8,8))
+
+# Power data
+    ax1 = fig.add_subplot(221)
+    ax1.plot(freq, mag, '-o', markersize=3, c='C0')
+    ax1.set_xlabel('Frequency (GHz)')
+    ax1.set_ylabel('Magnitude (mV)')
+
+    # Phase data
+    ax2 = fig.add_subplot(222)
+    ax2.plot(freq, phase, '-o', markersize=3, c='C0')
+    ax2.set_xlabel('Frequency (GHz)')
+    ax2.set_ylabel('Phase (deg)')
+
+    # Additional subplot on the bottom row
+    ax3 = fig.add_subplot(212)
+    ax3.plot(freq, I, '-o', markersize=3, c='r', label='I')
+    ax3.plot(freq,Q , '-o', markersize=3, c='b', label='Q')
+    ax3.set_xlabel('Frequency (GHz)')
+    ax3.set_ylabel('Voltage (mV)')
+
+    # if 'lo_list' in kwargs.keys():
+    #     lo_list = kwargs.get('lo_list')
+    #     axes = fig.axes
+    #     for ax in axes: 
+    #         ymin, ymax = ax.get_ylim()
+    #         for lo in lo_list:
+    #             ax.vlines(x = lo/1e9,ymin=ymin, ymax=ymax, ls='--')
+
+    if len(peaks) == 2:
+        txt = '$\omega_{01}$ = %.4f GHz\n$\omega_{02}$/2 = %.4f GHz\n$\\alpha$ = %.1f MHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz'%(freq[peaks[1]],freq[peaks[0]],(freq[peaks[0]]-freq[peaks[1]])*1e3,qb_power,rr_power,qb_pars['rr_freq']*1e-9)
+    elif len(peaks) == 1:
+        txt = '$\omega_{01}$ = %.4f GHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz'%(freq[peaks[0]], qb_power, rr_power, qb_pars['rr_freq']*1e-9)
+    else:
+        txt = '$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz\n$amp_q$ = %.5f'%(qb_power,rr_power,qb_pars['rr_freq']*1e-9, amp_q_scaling)
+    
+    plt.gcf().text(1, 0.15, txt, fontsize=14)
+    # fig.set_title(f'{element} spectroscopy {iteration}')
+    plt.tight_layout()
 
 #%% init_IQ_plot
 def init_IQ_plot():
@@ -221,7 +214,69 @@ def heatplot(xdata, ydata, data, xlabel = "", ylabel = "", normalize=False, cbar
     plt.tight_layout()
     plt.show()
 
-    return hm;
+def punchout_plot(data, xlabel = "", ylabel = "", normalize=False, 
+             cbar_label = 'log mag',title='', **kwargs):
+    
+    freqs = data['freqs']
+    I = data['I']
+    Q = data['Q']
+    z_data = convert_V_to_dBm(np.array(data['mag']))
+    attenuations = data['attenuations']
+    chi= freqs[0][np.argmin(z_data[0])] - freqs[0][np.argmin(z_data[-1])]
+
+    print(f'Dispersive shift: {round(0.5*chi/np.pi*1e-3,1)} kHz')
+
+    fig = plt.figure(figsize=(6,5), dpi=300)
+    ax1  = fig.add_subplot(6,1,(1,4))
+    # if normalize:
+    #     cbar_label += ' (normalized)'
+    df = pd.DataFrame(z_data, columns = freqs[0], index = attenuations)
+    
+    if normalize:
+        # df = df.apply(lambda x: (x-x.mean())/x.std(), axis = 1)
+        df = df.apply(lambda x: (x/x.max()), axis = 1)
+    
+    cbar_options = {
+        'label':    cbar_label,
+        # 'ticks':    np.around(np.linspace(np.amin(z_data),np.amax(z_data),5),1),
+        'pad':      0.05,
+        # 'values':   np.linspace(np.amin(z_data),np.amax(z_data),1000),
+        'shrink':   1.1,
+        'location': 'top',
+    }
+    kwargs = {
+        'linewidths':  0,
+        # 'xticklabels': np.linspace(min(xdata),max(xdata)+0.5,5),
+        # 'yticklabels': np.linspace(min(ydata),max(ydata)+0.5,5),
+        'vmin':        np.amin(z_data),
+        'vmax':        np.amax(z_data)
+    }
+    
+    hm = sns.heatmap(df, ax=ax1,cmap = 'seismic', cbar_kws=cbar_options)
+    # hm.set_xlabel(xlabel, fontsize=12)
+    hm.set_ylabel(ylabel, fontsize=14)
+    hm.spines[:].set_visible(True)
+    # ax1.set_title(title,fontsize=12)
+    ax1.tick_params(direction='out',length=0.01,width=0.5,bottom=False, top=False, left=True, right=False,labeltop=False, labelbottom=True,labelrotation=90,labelsize=10,size=8)
+    plt.yticks(rotation=0)
+    
+    ax2 = fig.add_subplot(6,1,(5,6))
+    ax2.plot(freqs[0],z_data[0],'o', markersize = 3, c='b',label=f'$P_r$ = -{attenuations[0]} dB')
+    ax2.plot(freqs[0],z_data[-1],'o', markersize = 3, c='r',label=f'$P_r$ = -{attenuations[-1]} dB')
+    ax2.legend()
+    ax2.set_xlabel(xlabel, fontsize=12)
+    ax2.set_ylabel(cbar_label,fontsize=12)
+    fc1,_ = fit_res(freqs[0],  I=I[0], Q=Q[0])
+    fc2,_ = fit_res(freqs[0], I=I[-1], Q = Q[-1])
+    txt = f'$f_1$ = {fc1:.5f} GHz\n$f_2$ = {fc2:.5f} GHz\n$2\chi/2\pi$ = {(fc2-fc1)*1e3:.1f} MHz'
+    plt.gcf().text(0.95, 0.15, txt, fontsize=14)
+    
+    # plt.tight_layout()
+        
+    # return df
+
+
+    # return hm;
 
 #%% plot_single_shot
 def plot_single_shot(datadict):
@@ -293,7 +348,9 @@ def plot_mixer_opt(par1,par2,power_data,cal='LO',element='qubit',fc=5e9):
 
 
 #%% fit_res
-def fit_res(f_data,z_data,res_type='notch'):
+def fit_res(f_data,I,Q,res_type='notch'):
+    
+    z_data = np.abs(I+1j*Q)
     fc = f_data[np.argmin(z_data)]
     if res_type == 'notch':
         z_data = -z_data-min(-z_data)
@@ -305,9 +362,9 @@ def fit_res(f_data,z_data,res_type='notch'):
     print(f'Resonant Frequency: {fc*1e-9:.5f} GHz\nFWHM = {fwhm*1e-6} MHz\nkappa = {2*np.pi*fwhm*1e-6:.3f} MHz')
     return fc,fwhm
 
-def find_peak(f_data,z_data):
+# def find_peak(f_data,z_data):
     
-    return fc
+#     return fc
 
 #%% fit_data
 def fit_data(x_vector,y_vector,sequence='rabi',dt=0.01,fitFunc='',verbose=0):

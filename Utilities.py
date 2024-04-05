@@ -13,6 +13,7 @@ import numpy as np
 import glob
 import os
 import pandas as pd
+
 #%% make_progress_meter
 # display progress bar and send slack notification
 def make_progress_meter(n_handle, n_total):
@@ -32,6 +33,7 @@ def make_progress_meter(n_handle, n_total):
                 progress_bar.update(Δn)
                 n0 = n
 
+        
 #%% round_to_clk
 def clk(num):
     return round(num/4)
@@ -84,4 +86,9 @@ def IQ_imbalance(g,phi):
     N = 1 / ((1-g**2)*(2*c**2-1))
     return [float(N * x) for x in [(1-g)*c, (1+g)*s, (1-g)*s, (1+g)*c]]
 
+def convert_V_to_dBm(x):
+    '''
+    converts from rms voltage to dBm, assuming 50 Ohm. Voltage is in V
+    '''
+    return 10*np.log10(x**2*1000/50.)
 # def save_datadict_to_csv(f, name, datadict)

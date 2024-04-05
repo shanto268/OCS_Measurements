@@ -5,7 +5,7 @@ Created on Mon Oct 4 2022
 """
 from scipy.signal.windows import gaussian
 from scipy.signal import savgol_filter
-from waveform_tools import *
+# from waveform_tools import *
 from qm import generate_qua_script
 from qm.qua import *
 from qm import LoopbackInterface
@@ -17,21 +17,21 @@ from datetime import datetime
 import csv
 import glob
 import time
-import instrument_init as inst
 import numpy as np
 import json
-from VISAdrivers.sa_api import *
 from qualang_tools.loops import from_array
 from qualang_tools.analysis.discriminator import two_state_discriminator
 from qm.logger import logger
 from Utilities import *
 from datetime import date
 from pathlib import Path
+from helper_functions import save_data
 import warnings
 import matplotlib.pyplot as plt
 from sequence import *
 from Instruments import instruments
 from config import Configuration
+from collections import OrderedDict
 
 logger.setLevel(level='WARNING')
 device = 'darpa2A'
@@ -75,10 +75,11 @@ class qubit():
                     "amp_r":                        0.45,
                     "readout_pulse_len_in_clk":     500,        # length of readout integration weights in clock cycles
                     "saturation_duration" :         clk(10e3),  # saturation duration for spectroscopy
-                    'readout_len':                  2000,  # length of a normal readout in ns,
+                    'readout_length':                  2000,  # length of a normal readout in ns,
 
                     # qubit parameters
                     "qubit_freq":                   int(4.5129e9),
+                    "rr_freq":                      int(6.2e9),
 
                     # calibrated setup parameters
                     "analog_input_offsets":         [0,0],
@@ -145,8 +146,10 @@ class qubit():
         self._directory = saveDir
         self._instruments = instruments()
         self.init_instruments()
+        # self.make_config(self.pars)
         self.config_maker = Configuration(self)
-        self.make_config(self.pars)
+        self.config = self.config_maker.make_config()
+        # self.make_config(self.pars)
 
 
 #%% EXPERIMENTS
@@ -183,11 +186,9 @@ class qubit():
                  df = 0.1e6,
                  IF_min = 10e6,
                  IF_max = 20e6,
-                 n_avg = 500,
-                 atten_range = [10,30],
+                 attenuations = [10,30],
                  atten_step = 0.1,
-                 f_LO = [6,7.2],
-                 res_ringdown_time = int(4e3)):
+                 savedata=True):
         """
         Executes punchout measurement for list of resonator frequencies
 
@@ -203,71 +204,47 @@ class qubit():
 
         """
         iteration = counter(self._directory,self.experiment,element='rr',extension='*.csv')
-        
-        span=IF_max-IF_min
-        attenuation_range = np.arange(atten_range[0],atten_range[1],step=atten_step)
-        freq_arr = np.zeros((int(span/df)+1,len(f_LO)))
-        I = np.zeros((len(attenuation_range),int(span/df)+1,len(f_LO)))
-        Q = np.zeros((len(attenuation_range),int(span/df)+1,len(f_LO)))
-        mag = np.zeros((len(attenuation_range),int(span/df)+1,len(f_LO)))
-        magData = np.zeros((len(attenuation_range),int(span/df)+1))
+        data = dict(I=[],Q=[],freqs=[],mag=[])
+        data['attenuations'] = attenuations
 
-        i = 0
-        for fc in f_LO:
-            print(f'Measuring resonator at {fc*1e-9} GHz')
-            #f_LO = fc - span/2
-            j = 0
-            for a in tqdm(attenuation_range):
-                print(f'Attenuation = {a} dB')
-                dataI,dataQ,freqs,job = self.resonator_spec(f_LO=fc,atten=a,IF_min=IF_min,IF_max=IF_max,df=df,n_avg=n_avg,res_ringdown_time=res_ringdown_time,savedata=False,fit=False)
-                freq_arr[:,i] = freqs
-                I[j,:,i] = dataI
-                Q[j,:,i] = dataQ
-                mag[j,:,i] = np.abs(dataI+1j*dataQ)
-                j += 1
-            chi= freqs[np.argmin(mag[0,:,i])] - freqs[np.argmin(mag[-1,:,i])]
-            print(f'Dispersive shift for resonator at {round(fc*1e-9,5)} GHz: {round(0.5*chi/np.pi*1e-3,1)} kHz')
-            pf.heatplot(xdata=np.around(freqs*1e-9,4),ydata=attenuation_range,data=pf.Volt2dBm(mag[:,:,i]),xlabel='Frequency (GHz)',ylabel='Attenuation (dB)',cbar_label='Magnitude (dBm)')
-            i += 1
+        for a in tqdm(attenuations):
+            print(f'Attenuation = {a} dB')
+            self._instruments.set('DA','attenuation',a)
+            spec_data,job = self.resonator_spec(f_LO=self.pars['rr_LO'],IF_min=IF_min,IF_max=IF_max,df=df,showprogress=True,savedata=False,fit=False)
+            data['freqs'].append(np.around(spec_data['freqs']*1e-9,5))
+            data['I'].append(spec_data['I'])
+            data['Q'].append(spec_data['Q'])
+            data['mag'].append(np.abs(spec_data['I']+1j*spec_data['Q']))
 
-        exp_dict = {'date/time':    datetime.now(),
-                   'nAverages': n_avg,
-                         'w_LO': self.pars['rr_LO'],
-                         'attenuation': attenuation_range,
-                'wait_period':  res_ringdown_time,
-                }
+        self._instruments.set('DA','attenuation',self.pars['readout_atten'])
 
-        # save data
-        dataPath = '{saveDir}\spectroscopy\\resonator_spec'
-        if not os.path.exists(dataPath):
-            Path(dataPath).mkdir(parents=True, exist_ok=True)
-        with open(f"{dataPath}\data_{iteration:03d}.csv","w") as datafile:
-            writer = csv.writer(datafile)
-            writer.writerow(exp_dict.keys())
-            writer.writerow(exp_dict.values())
-            writer.writerow(freqs)
-            writer.writerow(I)
-            writer.writerow(Q)
+        if savedata:
+            metadata = dict(timestamp = datetime.now(),
+                            qubit_pars = self.pars,
+                            attenuation_range = attenuation_range,
+                            atten_step = atten_step,)
+            dataPath =  f'{saveDir}\\{self.experiment}\\rr'
+            data = dict(I=I,Q=Q,freqs=freq_arr,mag=mag)
+            save_data(dataPath, iteration, metadata, data)
 
-        return I, Q, freqs, job
+
+        return data, job
 
     #def find_dispersive_shift(self, ):
         
     #%%% run_scan
     def run_scan(self,
                  df = 0.1e6,
-                 n_avg = 500,
                  element='resonator',
-                 check_mixers=True,
+                 check_mixers=False,
                  chunksize = 200e6,
-                 attenuation=20,
                  lo_min = 6e9,
                  lo_max = 7e9,
+                 on_off=True,
                  amp_q_scaling = 1,
                  saturation_dur = 20e3,
-                 showprogress=False, 
-                 res_ringdown_time = 4e3,
-                 plot=True, flux=0):
+                 showprogress=False,
+                 savedata=False):
         """
         Scans a broad range of frequencies in search for qubits/resonators
 
@@ -285,13 +262,14 @@ class qubit():
             TYPE: DESCRIPTION.
 
         """
-        today = datetime.today()
-        sDate =  today.strftime("%Y%m%d")
-        saveDir = f'G:\\Shared drives\\CavityCooling\data\\{self.name}\\{sDate}'
+        # today = datetime.today()
+        # sDate =  today.strftime("%Y%m%d")
+        # saveDir = f'G:\\Shared drives\\CavityCooling\data\\{self.name}\\{sDate}'
         
-        dataPath = f'{saveDir}\\spectroscopy\\{element}_spec'
-        filename = 'data'
-        iteration = get_index_for_filename(dataPath, filename, file_format='csv')
+        # dataPath = f'{saveDir}\\spectroscopy\\{element}_spec'
+        # filename = 'data'
+        # iteration = get_index_for_filename(dataPath, filename, file_format='csv')
+        iteration = counter(self._directory,self.experiment,element=element,extension='*.csv')
 
         freq_arr = []
         I = []
@@ -304,68 +282,64 @@ class qubit():
             numchunks = 1
             lo_list = [lo_min]
 
-        for f in lo_list:
+        for f in tqdm(lo_list):
             if element == 'resonator':
-                dataI,dataQ,freqs,job = self.resonator_spec(f_LO=f,atten=attenuation,IF_min=df,IF_max=chunksize,df=df,n_avg=n_avg,res_ringdown_time=res_ringdown_time,savedata=False)
+                data, job = self.resonator_spec(f_LO=f,IF_min=df,IF_max=chunksize,df=df,showprogress=showprogress,savedata=False)
             elif element == 'qubit':
-                dataI,dataQ,freqs,job = self.qubit_spec(f_LO=f,
+                data,job = self.qubit_spec(f_LO=f,
                                                         amp_q_scaling=amp_q_scaling,
                                                         check_mixers=check_mixers,
+                                                        on_off=on_off,
                                                         saturation_dur=saturation_dur,
-                                                        atten=attenuation,IF_min=df,IF_max=chunksize,df=df,n_avg=n_avg,showprogress=showprogress,savedata=True)
-            elif element == 'fflqb':
-                dataI, dataQ,freqs, job = self.fflt1_spec(spec='qb',f_LO=f, 
+                                                        showprogress=showprogress,
                                                         IF_min=df,IF_max=chunksize,df=df,
-                                                        n_avg=n_avg, 
-                                                        amp_ffl_scaling=amp_q_scaling, 
-                                                        check_mixers= check_mixers,showprogress=True,
-                                                        savedata=True, flux=flux)
-            
-            elif element == 'fflrr':
-                dataI, dataQ,freqs, job = self.fflt1_spec(spec='rr',f_LO=f, 
-                                                        IF_min=df,IF_max=chunksize,df=df,
-                                                        n_avg=n_avg, 
-                                                        amp_ffl_scaling=amp_q_scaling, 
-                                                        check_mixers= check_mixers,showprogress=True,
-                                                        savedata=True, flux=flux)
-                
-            elif element == 'diss':
-                dataI, dataQ,freqs, job = self.diss_spec(f_LO=f, 
-                                                        IF_min=df,IF_max=chunksize,df=df,
-                                                        n_avg=n_avg, 
-                                                        amp_ffl_scale=amp_q_scaling, 
-                                                        check_mixers= check_mixers,
                                                         savedata=False)
+            # elif element == 'fflqb':
+            #     dataI, dataQ,freqs, job = self.fflt1_spec(spec='qb',f_LO=f, 
+            #                                             IF_min=df,IF_max=chunksize,df=df,
+            #                                             n_avg=n_avg, 
+            #                                             amp_ffl_scaling=amp_q_scaling, 
+            #                                             check_mixers= check_mixers,showprogress=True,
+            #                                             savedata=True, flux=flux)
+            
+            # elif element == 'fflrr':
+            #     dataI, dataQ,freqs, job = self.fflt1_spec(spec='rr',f_LO=f, 
+            #                                             IF_min=df,IF_max=chunksize,df=df,
+            #                                             n_avg=n_avg, 
+            #                                             amp_ffl_scaling=amp_q_scaling, 
+            #                                             check_mixers= check_mixers,showprogress=True,
+            #                                             savedata=True, flux=flux)
                 
-            freq_arr.extend(freqs)
-            I.extend(dataI)
-            Q.extend(dataQ)
+            # elif element == 'diss':
+            #     dataI, dataQ,freqs, job = self.diss_spec(f_LO=f, 
+            #                                             IF_min=df,IF_max=chunksize,df=df,
+            #                                             n_avg=n_avg, 
+            #                                             amp_ffl_scale=amp_q_scaling, 
+            #                                             check_mixers= check_mixers,
+            #                                             savedata=False)
+                
+            freq_arr.extend(data['freqs'])
+            I.extend(data['I'])
+            Q.extend(data['Q'])
             reports += str(job.execution_report()) + '\n'
             
         
-        exp_dict = {'date/time':    datetime.now(),
-                   'nAverages': n_avg,
-                         'w_LO': self.pars['rr_LO'],
-                         'attenuation': attenuation,
-                'wait_period':  self.pars['rr_resettime'],
-                'report': reports
-                }
-        if plot:
-            fig = pf.spec_plot(np.array(freq_arr),np.array(I),np.array(Q),attenuation=self.pars['ffl_atten'],df=df,iteration=iteration,element='ffl', lo_list=lo_list, flux=flux, amp_ffl_scaling=amp_q_scaling)
-          
-        # save data
-        dataPath = '{saveDir}\spectroscopy\{element}_spec'
-        if not os.path.exists(dataPath):
-            Path(dataPath).mkdir(parents=True, exist_ok=True)
-        with open(f"{dataPath}\data_{iteration:03d}.csv","w") as datafile:
-            writer = csv.writer(datafile)
-            writer.writerow(exp_dict.keys())
-            writer.writerow(exp_dict.values())
-            writer.writerow(freq_arr)
-            writer.writerow(I)
-            writer.writerow(Q)
+        if savedata:  
+            # save data
+            dataPath = '{saveDir}\spectroscopy\{element}_spec'
+            if not os.path.exists(dataPath):
+                Path(dataPath).mkdir(parents=True, exist_ok=True)
+            with open(f"{dataPath}\data_{iteration:03d}.csv","w") as datafile:
+                writer = csv.writer(datafile)
+                writer.writerow(exp_dict.keys())
+                writer.writerow(exp_dict.values())
+                writer.writerow(freq_arr)
+                writer.writerow(I)
+                writer.writerow(Q)
 
-        return I, Q, freq_arr, job
+        data = dict(I=np.array(I),Q=np.array(Q),freqs=np.array(freq_arr))
+
+        return data, job
 
     #%%% resonator_spec
     def resonator_spec(self, IF_min = 0.1e6,
@@ -374,6 +348,7 @@ class qubit():
                        df = 0.1e6,
                        showprogress=False,
                        savedata=True,
+                       on_off=False,
                        flux = None,
                        **kwargs):
         """
@@ -402,42 +377,31 @@ class qubit():
         iteration = counter(self._directory,self.experiment,element='rr',extension='*.csv')
 
         freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
-        # freqs_list = freqs.tolist()
-        # set attenuation and change rr_LO freq
-        self._instruments.set('DA','attenuation',self.pars['readout_atten'])
-
         self.update_value('rr_LO', value = f_LO)
-        self._instruments.set('readout_LO','frequency',self.pars['rr_LO'])
-        # readout_length = self.pars['readout_length']
-        seq = sequence(self,'rr_spec',n_avg=self.pars['n_avg'], IF_min=IF_min, IF_max=IF_max, df=df,)
-        rr_spec = seq.make_sequence(self)
+        seq = sequence(self,'rr_spec',on_off=on_off,n_avg=self.pars['n_avg'], IF_min=IF_min, IF_max=IF_max, df=df,)
+        rr_spec = seq.make_resonator_spec_sequence()
 
-        datadict,job = self.get_results(rr_spec,result_names=["I","Q","n"],showprogress=showprogress)
+        datadict,job = self.get_results(rr_spec,result_names=["I","Q"],progress_key='n',showprogress=showprogress)
 
         I = np.array(datadict["I"])
         Q = np.array(datadict["Q"])
         freq_arr = np.array(freqs + self.pars['rr_LO'])
-
+        data = dict(I=I,Q=Q,freqs=freq_arr)
         
-        exp_dict = {'date/time':    datetime.now(),
-                   'nAverages': self.pars['n_avg'],
-                         'w_LO': self.pars['rr_LO'],
-                'wait_period':  self.pars['rr_resettime'],
-                }
         if savedata:
-            # save data
+            metadata = {'date/time':    datetime.now(),
+                     'nAverages': self.pars['n_avg'],
+                             'w_LO': self.pars['rr_LO'],
+                 'wait_period':  self.pars['resettime']['rr'],
+                 }
             dataPath = f'{saveDir}\{self.experiment}\\rr'
-            if not os.path.exists(dataPath):
-                Path(dataPath).mkdir(parents=True, exist_ok=True)
-            with open(f"{dataPath}\data_{iteration:03d}.csv","w") as datafile:
-                writer = csv.writer(datafile)
-                writer.writerow(exp_dict.keys())
-                writer.writerow(exp_dict.values())
-                writer.writerow(freqs)
-                writer.writerow(I)
-                writer.writerow(Q)
+            data = {"I": I, "Q": Q, "freqs": freq_arr}
+            
+            save_data(dataPath, iteration, metadata, data)
+      
 
-        return I, Q, freq_arr, job, iteration
+
+        return data, job
 
 
 
@@ -544,49 +508,41 @@ class qubit():
 
     #%%% qubit_spec
     def qubit_spec(self,
-                   sa = 0,
                    f_LO = 5e9,
                    IF_min = 0.1e6,          # min IF frequency
                    IF_max = 400e6,          # max IF frequency
                    check_mixers=False,
                    df = 0.1e6,              # IF frequency step
-                   rr_freq = 6e9,       #resonator frequency
-                   amp_r_scaling = 1,
                    amp_q_scaling = 0.1,     # prefactor to scale default "const" qubit tone, amp_q
-                   n_avg = 500, # number of averages
-                   atten=10, # readout attenuation
                    saturation_dur = int(10e3),   # time qubit saturated w/ qubit tone, in ns
-                   resettime = int(40e3),      # wait time between experiments, in ns
                    on_off =  True,          # background subtraction
                    notify = False,
                    showprogress=False,
                    savedata=True,
-                   amp_cav_scaling=0.01,
-                   amp_ffl_scaling=0.01,
                    **kwargs):         # create notification on Slack when measurement finishes
 
-        try:
-            list_of_files = glob.glob(f'{saveDir}\spectroscopy\qubit_spec\*.csv')
-            latest_file = max(list_of_files, key=os.path.getctime)
-            iteration = int(latest_file[-7:-4].lstrip('0')) + 1
-        except:
-            iteration = 1
+        iteration = counter(self._directory,self.experiment,element='qubit',extension='*.csv')
 
         freq_arr = np.arange(IF_min, IF_max + df/2, df, dtype=int)
         saturation_dur = int(saturation_dur)
-        inst.set_attenuator(attenuation=self.pars['rr_atten'])
-
-
+        
         self.update_value('qubit_LO',value = f_LO)
-        inst.set_qb_LO(f_LO)
-        inst.set_rr_LO(self.pars['rr_LO'])
 
-        self.check_mix_cal(sa,check=check_mixers,amp_q = amp_q_scaling, threshold = - 60)
+        if check_mixers:
+            self.opt_lo_leakage(mode='coarse',element='qubit',sa_span=0.5e6,threshold=-30,plot=True)
+            self.update_value('qubit_IF',50e6)
+            self.opt_sideband(mode='coarse',element='qubit',sa_span=0.5e6,threshold=-20,plot=True)
+            self.opt_lo_leakage(mode='coarse',element='rr',sa_span=0.5e6,threshold=-30,plot=True)
+            self.update_value('rr_IF',50e6)
+            self.opt_sideband(mode='coarse',element='rr',sa_span=0.5e6,threshold=-20,plot=True)
 
-        prog = self.make_sequence(exp='qubit-spec',on_off=on_off,saturation_dur=saturation_dur,var_arr=freq_arr,n_avg=n_avg,amp_q_scaling=amp_q_scaling,amp_r_scaling=amp_r_scaling,amp_cav_scaling=amp_cav_scaling,amp_ffl_scaling=amp_ffl_scaling)
+        # prog = self.make_sequence(self,on_off=on_off,saturation_dur=saturation_dur,amp_q_scaling=amp_q_scaling, IF_min=IF_min, IF_max=IF_max, df=df,)
+        
+        seq = sequence(self,name='qubit_spec',on_off=on_off,saturation_dur=saturation_dur,amp_q_scaling=amp_q_scaling, IF_min=IF_min, IF_max=IF_max, df=df,)
+        prog = seq.make_qubit_spec_sequence()
         # execute 'QubitSpecProg' using configuration settings in 'config'
         # fetch averaged I and Q values that were saved
-        datadict, job = self.get_results(jobtype = prog, result_names = ["I", "Q"], n_total=n_avg,showprogress=showprogress, notify = notify)
+        datadict, job = self.get_results(jobtype = prog, result_names = ["I", "Q"], showprogress=showprogress, notify = notify)
         
         # print('qubit power')
         # qb_power = self.get_power(sa,freq=self.pars['qubit_LO']+self.pars['qubit_IF'],reference=0,amp_q = amp_q_scaling, span=1e6,config=True,output=False)
@@ -596,8 +552,9 @@ class qubit():
         I = np.array(datadict["I"])
         Q = np.array(datadict["Q"])
         freq_arr = np.array(freq_arr + self.pars['qubit_LO'])
+        data = dict(I=I,Q=Q,freqs=freq_arr)
 
-        pf.spec_plot(freq_arr,I,Q,iteration=iteration,element='qubit',rrFreq=self.pars['rr_freq'],find_peaks=True, amp_q_scaling=amp_q_scaling, amp_cav_scaling=amp_cav_scaling, amp_ffl_scaling=amp_ffl_scaling)
+        
         # print(f'Qubit Frequency: {fc*1e-9:.5f} GHz\nFWHM = {fwhm*1e-6} MHz\nkappa = {2*np.pi*fwhm*1e-6:.3f} MHz')
 
         if savedata:
@@ -630,7 +587,8 @@ class qubit():
                     writer.writerow(freq_arr)
                     writer.writerow(I)
                     writer.writerow(Q)
-        return I, Q, freq_arr, job;
+        
+        return data, job;
 
     def fflt1_spec(self,
                    sa = 0,
@@ -1614,7 +1572,7 @@ class qubit():
 #%% CALIBRATIONS
   #%%% tof_cal
     def tof_cal(self,update_tof=False):
-        qmm = QuantumMachinesManager(host=host, port=port)
+        qmm = QuantumMachinesManager(host=self.pars['host'], port=self.pars['port'])
         with program() as tof_cal:
             n = declare(int)
             adc_st = declare_stream(adc_trace=True)
@@ -1634,7 +1592,7 @@ class qubit():
         adc1 = res_handles.get("adc1").fetch_all()
         adc2 = res_handles.get("adc2").fetch_all()
 
-        pf.tof_plot(adc1, adc2)
+        
         offset1 = np.mean(adc1)/4096
         offset2 = np.mean(adc2)/4096
         if update_tof:
@@ -1654,7 +1612,8 @@ class qubit():
         print(f'Input 2 Offset: {offset2*1e3} mV')
         self.update_value('analog_input_offsets', value = [self.pars['analog_input_offsets'][0] - offset1, self.pars['analog_input_offsets'][1] - offset2])
         
-
+        return adc1, adc2
+    
     def init_quantum_machine(self, initialize = True):
        self.qmm = QuantumMachinesManager(host=self.pars['host'], port=self.pars['port']) if initialize else None
 
@@ -1876,7 +1835,6 @@ class qubit():
     def get_results(self,jobtype, result_names = ["I", "Q"],
                                     progress_key = "n",
                                     showprogress = True,
-                                    n_total = 1000,
                                     notify = False,
                                     liveplot = False):
         """
@@ -1930,7 +1888,7 @@ class qubit():
 
         if showprogress:
             n_handle = res_handles.get(progress_key)
-            make_progress_meter(n_handle, n_total)
+            make_progress_meter(n_handle, self.pars['n_avg'])
 #
         res_handles.wait_for_all_values()
 
@@ -1942,7 +1900,7 @@ class qubit():
         # close quantum machine
         qmm.close_all_quantum_machines()
 
-        return datadict, job;
+        return datadict, job
 
     def unpack_data(self,datadict, names = ["I", "Q"]):
 
@@ -1973,256 +1931,10 @@ class qubit():
 
 #%%% Mixer
     #%%%% config_sa
-    def config_sa(self,sa,freq,span=5e6,reference=-30):
-        """
-        Prepares spectrum analyzer for measurement
 
-        Parameters
-        ----------
-        sa :
-            Handle for spectrum analyzer
-        freq : float
-            Center frequency of span.
-        span : float, optional
-            DESCRIPTION. The default is 5e6.
-        reference : float, optional
-            Upper power threshold of SA in dBm. The default is -30.
 
-        Returns
-        -------
-        None.
-
-        """
-
-        sa_config_level(sa, reference) # sets sensitivity
-        sa_config_center_span(sa, freq, span) # sets center frequency
-        sa_initiate(sa, SA_SWEEPING, 0)
-        query = sa_query_sweep_info(sa)
-        sweep_length = query["sweep_length"]
-        start_freq = query["start_freq"]
-        bin_size = query["bin_size"]
-        freqs = np.array([start_freq + i * bin_size for i in range(sweep_length)],dtype=float)
-
-    #%%%% get_power
-    # def get_power(self,sa,freq,reference=-100,span=1e6, amp_q=1, config=False, plot=False, output = True):
-    #     """
-    #     Configures SA (optional) and measures power at specified frequency
-
-    #     Parameters
-    #     ----------
-    #     sa : ???
-    #         spectrum analyzer.
-    #     freq : TYPE
-    #         DESCRIPTION.
-    #     reference : TYPE, optional
-    #         DESCRIPTION. The default is -100.
-    #     span : TYPE, optional
-    #         DESCRIPTION. The default is 5e6.
-    #     config : boolean, optional
-    #         whether to reconfigure the SA or not. Set to false when calibrating mixers. The default is False.
-    #     plot : TYPE, optional
-    #         DESCRIPTION. The default is False.
-    #     output: boolean, optional
-    #         whether or not to print the power at the requested frequency
-
-    #     Returns
-    #     -------
-    #     freqs : TYPE
-    #         DESCRIPTION.
-    #     power : TYPE
-    #         DESCRIPTION.
-
-    #     """
-    #     inst.set_attenuator(attenuation=0)
-
-    #     # skips configuring the spectrum analyzer. Used only when optimizing mixer
-    #     if config:
-    #         # self.play_pulses(amp_scale=amp_q)
-    #         sa_config_level(sa, reference) # sets sensitivity
-    #         sa_config_center_span(sa, freq, span) # sets center frequency
-    #         sa_initiate(sa, SA_SWEEPING, 0)
-    #         query = sa_query_sweep_info(sa)
-    #         sweep_length = query["sweep_length"]
-    #         start_freq = query["start_freq"]
-    #         bin_size = query["bin_size"]
-    #         freqs = np.array([start_freq + i * bin_size for i in range(sweep_length)],dtype=float)
-
-    #     # measure
-    #     signal = sa_get_sweep_64f(sa)['max']
-    #     power = round(np.max(signal),1)
-
-    #     if plot:
-    #         pf.power_plot(freqs, signal, power, fc=freq)
-    #     if output:
-    #         print(f'{power} dBm at {freq/1e9} GHz')
-
-    #     inst.set_attenuator(attenuation=self.pars['rr_atten'])
-
-    #     return power
-
-    # #%%%% opt_mixer
-    # def opt_mixer(self,sa,cal,mode,element,freq_span=1e6,amp_q=1,reference = -30, plot=True, switch='on'):
-    #     """
-    #     Minimizes leakage at LO ('lo' option) or at image sideband ('sb' option) by sweeping the relevant parameters
-
-    #     Args:
-    #         sa (): spectrum analyzer handle.
-    #         cal (str): Whether to minimize LO leakage or image sideband. The default is 'lo'.
-    #         mode (str): Coarse of fine stepsize.
-    #         element (str):       Which element to optimize (qubit (qubit) or readout (rr)).
-    #         pars (dict):        dictionary containing experimental values like mixer calibration offsets.
-    #         reference (float): Threshold of spectrum analyzer.
-    #         plot (TYPE, optional): DESCRIPTION. Defaults to False.
-
-    #     Returns:
-    #         values (float array): optimal calibration values.
-    #         argmin (TYPE): DESCRIPTION.
-
-    #     """
-    #     qm = self.play_pulses(element=element, amp_scale=amp_q, switch = switch)
-
-    #     if cal == 'LO':
-    #         if element=='ffl' or element=='fflqc':
-    #             if switch=='off':
-    #                 freq = self.pars[f'{element}_LO']
-    #                 par1 = self.pars[f'{element}_mixer_offsets'][0]
-    #                 par2 = self.pars[f'{element}_mixer_offsets'][1]
-    #                 print(f'LO at {round(freq*1e-9,5)} GHz\nCurrent I_offset = {round(par1*1e3,1)} mV, Current Q_offset = {round(par2*1e3,1)} mV')
-    #             else:
-    #                 freq = self.pars[f'{element}_LO']
-    #                 par1 = self.pars[f'{element}_mixer_offsets_on'][0]
-    #                 par2 = self.pars[f'{element}_mixer_offsets_on'][1]
-    #                 print(f'LO at {round(freq*1e-9,5)} GHz\nCurrent I_offset = {round(par1*1e3,1)} mV, Current Q_offset = {round(par2*1e3,1)} mV')
-    #         else:
-    #             freq = self.pars[f'{element}_LO']
-    #             par1 = self.pars[f'{element}_mixer_offsets'][0]
-    #             par2 = self.pars[f'{element}_mixer_offsets'][1]
-    #             print(f'LO at {round(freq*1e-9,5)} GHz\nCurrent I_offset = {round(par1*1e3,1)} mV, Current Q_offset = {round(par2*1e3,1)} mV')
-    #     elif cal == 'SB':
-    #         freq = self.pars[f'{element}_LO'] - self.pars[f'{element}_IF']
-    #         par1 = self.pars[f'{element}_mixer_imbalance'][0]
-    #         par2 = self.pars[f'{element}_mixer_imbalance'][1]
-    #         # if np.abs(par2) > 150e-3:
-    #         #     par2 = 0
-    #         print(f'Sideband at {round(freq*1e-9,5)} GHz\nCurrent gain = {round(par1,4)}, Current phase = {round(par2,4)}')
-
-    #     if element == 'rr':
-    #         inst.set_attenuator(attenuation=0)
-
-    #     self.config_sa(sa,freq,span=freq_span,reference=reference) # setup spectrum analyzer for measurement
-
-    #     # initialize sweep parameters
-
-    #     if switch == 'off':
-    #         if mode == 'coarse':
-    #             span = 50e-3
-    #             step = 10e-3
-    #         if mode == 'intermediate':
-    #             span = 10e-3
-    #             step = 1e-3
-            
-    #     else:
-    #         if cal == 'LO':
-    #             if mode == 'coarse':
-    #                 span = 40e-3
-    #                 step = 10e-3
-    #             elif mode == 'intermediate':
-    #                 span = 5e-3
-    #                 step = 1e-3
-    #             elif mode == 'fine':
-    #                 span = 1e-3
-    #                 step = 0.1e-3
-    #         elif cal == 'SB':
-    #             if mode == 'coarse':
-    #                 span = 150e-3
-    #                 step = 30e-3
-    #             elif mode == 'intermediate':
-    #                 span = 50e-3
-    #                 step = 10e-3
-    #             elif mode == 'fine':
-    #                 span = 6e-3
-    #                 step = 1e-3
-
-    #     par1_arr = np.arange(par1-span/2, par1+span/2, step)
-    #     par2_arr = np.arange(par2-span/2, par2+span/2, step)
-    #     L1 = len(par1_arr)
-    #     L2 = len(par2_arr)
-    #     power_data = np.zeros((L1,L2))
-
-    #     # sweep parameters and get power at every point
-    #     with tqdm(total = L1*L2,position=0, leave=True) as progress_bar:
-    #         for i, par1 in enumerate((par1_arr)):
-    #             for j, par2 in enumerate((par2_arr)):
-    #                 if cal == 'LO':
-    #                     qm.set_output_dc_offset_by_element(element, "I", par1)
-    #                     qm.set_output_dc_offset_by_element(element, "Q", par2)
-    #                 elif cal == 'SB':
-    #                     qm.set_mixer_correction(element,int(self.pars[f'{element}_IF']), int(self.pars[f'{element}_LO']), self.IQ_imbalance(par1, par2))
-    #                 time.sleep(0.1)
-    #                 power_data[i,j] = self.get_power(sa, freq,span=freq_span,output=False)
-    #                 progress_bar.update(1)
-
-    #     argmin = np.unravel_index(np.argmin(power_data), power_data.shape)
-    #     # print(argmin)
-    #     # set the parameters to the optimal values and modify the JSON dictionary
-    #     if cal == 'LO':
-    #         opt_I = round(par1_arr[argmin[0]],6)
-    #         opt_Q = round(par2_arr[argmin[1]],6)
-    #         qm.set_output_dc_offset_by_element(element, "I", opt_I)
-    #         qm.set_output_dc_offset_by_element(element, "Q", opt_Q)
-    #         if element=='ffl' or element=='fflqc':
-    #             if switch == 'off':
-    #                 self.update_value(f'{element}_mixer_offsets',[opt_I, opt_Q,])
-    #             else:
-    #                 self.update_value(f'{element}_mixer_offsets_on',[opt_I, opt_Q,])
-    #         else:
-    #             self.update_value(f'{element}_mixer_offsets',[opt_I, opt_Q,])
-    #         print(f'optimal I_offset = {round(opt_I*1e3,1)} mV, optimal Q_offset = {round(1e3*opt_Q,1)} mV')
-            
-    #     elif cal == 'SB':
-    #         qm.set_mixer_correction(element,int(self.pars[f'{element}_IF']), int(self.pars[f'{element}_LO']), self.IQ_imbalance(par1_arr[argmin[0]],par2_arr[argmin[1]]))
-    #         self.update_value(f'{element}_mixer_imbalance',[round(par1_arr[argmin[0]],6),round(par2_arr[argmin[1]],6)])
-    #         print(f"optimal gain = {round(par1_arr[argmin[0]],4)}, optimal phi = {round(par2_arr[argmin[1]],4)}")
-
-    #     if element == 'rr':
-    #         inst.set_attenuator(self.pars['rr_atten'])
-
-    #     print(f'Power: {np.amin(power_data)} dBm at {freq/1e9} GHz')
-    #     if plot:
-    #         pf.plot_mixer_opt(par1_arr, par2_arr, power_data,cal=cal,element=element,fc=freq)
-
-    # #%%%% check_mixer_calibration
-    # def check_mix_cal(self, sa, amp_q = 1, check = True, threshold = -56):
-    #     # checks LO leakage and image sideband power and opt mixer accordingly
-    #     if check:
-    #         for element in ['ffl']:
-    #             for j in ['LO']:
-    #                 if j == 'LO':
-    #                     fc = self.pars[f'{element}_LO']
-    #                 elif j == 'SB':
-    #                     fc = self.pars[f'{element}_LO'] -  self.pars[f'{element}_IF']
-    #                 print(f'Checking {element} {j}')
-    #                 leak = self.get_power(sa, freq = fc, reference = -20, config = True, amp_q = amp_q, plot = False)
-    #                 while leak > threshold:
-    #                     leak0 = leak
-    #                     ref = leak + 10
-    #                     print(f'Minimizing {element} {j} leakage')
-    #                     if leak > - 40:
-    #                         self.opt_mixer(sa,cal = j, mode = 'coarse', amp_q = amp_q, element = element, reference = ref, switch='on')
-    #                     elif leak < - 40 and leak > - 64:
-    #                         self.opt_mixer(sa, cal = j, mode = 'intermediate', amp_q = amp_q, element = element, reference = ref, switch='on')
-    #                     elif leak < - 64 and leak > - 74:
-    #                         self.opt_mixer(sa, cal = j, mode = 'fine', amp_q = amp_q, element = element, reference = ref, switch='on')
-    
-
-    #                     leak = self.get_power(sa,freq = fc,reference = ref, amp_q = amp_q, config = True, plot = False)
-
-    #                     if np.abs(leak - leak0) < 2:
-    #                         print("Can't optimize mixer further")
-    #                         break
-    #     else:
-    #         pass
-    def config_sa(self, fc=5e9, span=5e6, threshold = -30, bandwidth = 1e3):
+    #%%%% config_sa
+    def config_sa(self, fc=5e9, sa_span=5e6, threshold = -30, bandwidth = 1e3):
         """
         Configures settings of the spectrum analyzer
 
@@ -2234,22 +1946,12 @@ class qubit():
 
         """
         self._instruments.set('sa','frequency', fc)
-        self._instruments.set('sa','span', span)
+        self._instruments.set('sa','span', sa_span)
         self._instruments.set('sa','threshold', threshold)
         self._instruments.set('sa','bandwidth', bandwidth)
-        # sa_config_level(self.sa, reference)        # sets sensitivity
-        # sa_config_center_span(self.sa, freq, span) # sets center frequency
-        # sa_initiate(self.sa, SA_SWEEPING, 0)
-        # query = sa_query_sweep_info(self.sa)
-        # sweep_length = query["sweep_length"]
-        # start_freq = query["start_freq"]
-        # bin_size = query["bin_size"]
-        # freqs = np.array([start_freq + i * bin_size for i in range(sweep_length)], dtype=float)
-
-        # return freqs 
     
 #%% get_power
-    def get_power(self, fc=5e9, threshold=-100, span=1e6, config=False, plot=False):
+    def get_power(self, fc=5e9, threshold=-100, sa_span=1e6, config=False, plot=False):
         """
         Configures SA (optional) and measures power at specified frequency
 
@@ -2266,7 +1968,7 @@ class qubit():
         """
         # skips configuring the spectrum analyzer. Used only when optimizing mixer
         if config:
-            freqs = self.config_sa(fc=fc, span=span, threshold=threshold)
+            self.config_sa(fc=fc, sa_span=sa_span, threshold=threshold)
 
         # measure
         data = self._instruments.get('sa','signal',verbose=False)
@@ -2292,8 +1994,8 @@ class qubit():
 
         return peak_power
 
-#%% opt_mixer
-    def opt_lo_leakage(self,  mode, element = 'readout', freq_span = 1e6, threshold = -30, plot = True):
+    #%% opt_leakage
+    def opt_lo_leakage(self,  mode, element = 'readout', sa_span = 1e6, threshold = -30, plot = True):
         """
         Minimizes leakage at LO ('lo' option) or at image sideband ('sb' option) by sweeping the relevant parameters
 
@@ -2313,17 +2015,15 @@ class qubit():
 
         # gets frequency values
         freqLO = self.pars[f'{element}_LO']
-
-        leakage = self.get_power(fc=freqLO, threshold=threshold, span=freq_span, config=True)
-        freq = freqLO
-        par1, par2 = self.pars[f'{element}_mixer_offsets']
-        print(f'LO at {round(freqLO*1e-9,5)} GHz\nCurrent I_offset = {round(par1*1e3,1)} mV, Current Q_offset = {round(par2*1e3,1)} mV')
-
         if element == 'rr':
             atten = self.pars['readout_atten']
             self.update_value('readout_atten', 0)
+        leakage = self.get_power(fc=freqLO, threshold=threshold, sa_span=sa_span, config=True)
+        freq = freqLO
+        par1, par2 = self.pars[f'{element}_mixer_offsets']
+        print(f'LO at {round(freqLO*1e-9,5)} GHz\nCurrent I_offset = {round(par1*1e3,1)} mV, Current Q_offset = {round(par2*1e3,1)} mV')        
 
-        self.config_sa(freq, span=freq_span, threshold=leakage+20) # setup spectrum analyzer for measurement
+        self.config_sa(freq, sa_span=sa_span, threshold=leakage+20) # setup spectrum analyzer for measurement
 
         # initialize sweep parameters
         if mode == 'coarse':
@@ -2371,7 +2071,8 @@ class qubit():
             pf.plot_mixer_opt(par1_arr, par2_arr, power_data, cal='LO', element=element, fc=freq)
         else:
             pass
-
+    
+    #%% opt_sideband
     def opt_sideband(self,  mode, amplitude=0.2, element = 'readout', sa_span = 1e6, threshold = -30, plot = True):
             """
             Minimizes leakage at LO ('lo' option) or at image sideband ('sb' option) by sweeping the relevant parameters
@@ -2391,38 +2092,31 @@ class qubit():
             """
             
             qm,job = self.play_pulses(amplitude=amplitude, element=element) # to generate sidebands
-
+            if element == 'rr':
+                atten = self.pars['readout_atten']
+                self.update_value('readout_atten', 0)
+            
             # gets frequency values
             freqLO = self.pars[f'{element}_LO']
             freqIF = self.pars[f'{element}_IF']
 
             freq = freqLO - freqIF
-            leakage = self.get_power(fc=freq, threshold=threshold, span=sa_span, config=True,plot=True)
+            leakage = self.get_power(fc=freq, threshold=threshold, sa_span=sa_span, config=True,plot=True)
             centers = self.pars[f'{element}_mixer_imbalance']
             print(f'Sideband at {round((freq)*1e-9,5)} GHz\nCurrent gain = {round(centers[0],4)}, Current phase = {round(centers[1],4)}')
 
-            if element == 'rr':
-                atten = self.pars['readout_atten']
-                self.update_value('readout_atten', 0)
-
-            self.config_sa(fc=freq, span=sa_span, threshold=leakage+20) # setup spectrum analyzer for measurement
+        
 
             # initialize sweep parameters
         
             if mode == 'coarse':
                 span = [0.2,0.5]
                 n_steps = [10,10]
-                # span_amp=500e-3
-                # step_amp=50e-3
-                # span_phi=0.75
-                # step_phi=0.11
+                
             elif mode == 'fine':
                 span = [0.05,0.1]
                 n_steps = [10,10]
-                # span_amp=10e-3
-                # step_amp=0.75e-3
-                # span_phi=0.1
-                # step_phi=0.01
+                
             
             gain = np.linspace(centers[0]-span[0]/2, centers[0]+span[0]/2, n_steps[0])
             phase = np.linspace(centers[1]-span[1]/2, centers[1]+span[1]/2, n_steps[1])
@@ -2459,69 +2153,9 @@ class qubit():
                 pf.plot_mixer_opt(gain, phase, power_data, cal='SB', element=element, fc=freq)
 
 
-            # # sweep parameters and get power at every point
-            # with tqdm(total = L1*L2) as progress_bar:
-            #     for i, amp in enumerate((amp_arr)):
-            #         for j, phi in enumerate((phi_arr)):
-            #             # qm,job = self.play_pulses(amplitude=amplitude, element=element)
-            #             # qm.set_mixer_correction(element, int(freqIF), int(freqLO), IQ_imbalance(par1, par2))
-            #             job.set_element_correction(element, IQ_imbalance(amp, phi))
-            #             time.sleep(0.1)
-            #             power_data[i,j] = self.get_power()
-            #             progress_bar.update(1)
-
-            # argmin = np.unravel_index(np.argmin(power_data), power_data.shape)
-
-            # # set the parameters to the optimal values and modify the JSON dictionary
-
-            # imbalance = amp_arr[argmin[0]], phi_arr[argmin[1]]
-            # qm.set_mixer_correction(element, int(freqIF), int(freqLO), IQ_imbalance(*imbalance)) # have to set the mixer correction using this method after the optimization has finished
-            # self.update_value(f'{element}_mixer_imbalance', imbalance)
-
-            # print(f"optimal gain = {round(amp_arr[argmin[0]],4)}, optimal phi = {round(phi_arr[argmin[1]],4)}")
-
-            # if element == 'rr':
-            #     self.update_value('readout_atten', atten)
-
-            # print(f'Power: {np.amin(power_data)} dBm at {freq/1e9} GHz')
-            # if plot:
-            #     plot_mixer_opt(amp_arr, phi_arr, power_data, cal='SB', element=element, fc=freq)
-
-
 #%%% Macros
 
-    #%%%% declare_vars
-    def declare_vars(self,types):
-        return [declare(tp) for tp in types]
-
-    #%%%% declare_streams
-    def declare_streams(self,stream_num=1):
-        return [declare_stream() for num in range(stream_num)]
-
-    #%%%% res_demod
-    def res_demod(self,I, Q,switch_weights=False):
-        if switch_weights:
-            return (dual_demod.full("integW_cos", "out1", "integW_minus_sin", "out2", I),
-                    dual_demod.full("integW_sin", "out1", "integW_cos", "out2", Q))
-        else:
-            return (dual_demod.full("integW_cos", "out1", "integW_sin", "out2", I),
-                    dual_demod.full("integW_minus_sin", "out1", "integW_cos", "out2", Q))
-        
-        
-    
-    def res_demod_diss(self,I, Q):
-        return (dual_demod.full("integW_cos_diss", "out1", "integW_minus_sin_diss", "out2", I),
-                dual_demod.full("integW_sin_diss", "out1", "integW_cos_diss", "out2", Q))
-
-
-
-
-
-
-
-    #%% CONFIGURATION
-
-    #%%% Helpers
+   
 
     #%%%% IQ_imbalance
     def IQ_imbalance(self,g, phi):
@@ -2554,20 +2188,21 @@ class qubit():
         if key in self.pars.keys():
             print(f'Updating {key} to {value}')
             self.pars[key] = value
-            self.make_config(self.pars)
-    
-            if key == 'qubit_LO':
-                inst.set_qb_LO(value)
-            elif key == 'rr_LO':
-                inst.set_rr_LO(value)
-            elif key == 'rr_atten':
-                inst.set_attenuator(value)
-            elif key == 'qubit_freq':
-                self.update_value('qubit_IF',self.pars['qubit_freq']-self.pars['qubit_LO'])
-    
+
+            self.config = self.config_maker.update_configuration(new_pars=self.pars)
             self.write_pars()
+
+            if key == 'qubit_LO':
+                self._instruments.set('qubit_LO','frequency',value)
+            elif key == 'rr_LO':
+                self._instruments.set('readout_LO','frequency',value)
+            elif key == 'readout_atten':
+                self._instruments.set('DA','attenuation',value)
+            elif key == 'qubit_freq':
+                self.update_value('qubit_IF',self.pars['qubit_freq']-self.pars['qubit_LO'])            
         else:
             warnings.warn(f"key to update does not exist, creating new key: {key} in qb.pars")
+            self.pars[key] = value
 
     #%%%% write_pars
     def write_pars(self):
@@ -2585,414 +2220,6 @@ class qubit():
         print(f'Adding {key} = {value} to pars')
         self.pars[key] = value
         self.write_pars()
-
-    #%%% Make Config
-    #%%%% make_config
-    def make_config(self, pars):
-        gauss_wf_4ns = self.delayed_gauss()
-
-        self.config = {
-
-            "version": 1,
-
-            "controllers": {
-                "con2": {
-                    "type": "opx1",
-                    "analog_outputs": {
-                        1: {"offset": pars['rr_mixer_offsets'][0]},  # qubit I
-                        2: {"offset": pars['rr_mixer_offsets'][1]},  # qubit Q
-                        3: {"offset": pars['qubit_mixer_offsets'][0]},  # rr I
-                        4: {"offset": pars['qubit_mixer_offsets'][1]},  # rr Q
-                        5: {"offset": pars['ffl_mixer_offsets_on'][0]},  # ffl I
-                        6: {"offset": pars['ffl_mixer_offsets_on'][1]},  # ffl Q
-                        7: {"offset": pars['qubit12_mixer_offsets'][0]},  # diss I
-                        8: {"offset": pars['qubit12_mixer_offsets'][1]}, 
-                        7: {"offset": pars['fflqc_mixer_offsets'][0]},  # ffl I
-                        8: {"offset": pars['fflqc_mixer_offsets'][1]},
-                    },
-                    "digital_outputs": {},
-                    "analog_inputs": {
-                        1: {"offset": pars['analog_input_offsets'][0], "gain_db": 0},  # rr I
-                        2: {"offset": pars['analog_input_offsets'][1], "gain_db": 0}  # rr Q
-                    },
-                },
-            },
-
-            "elements": {
-                "qubit": {
-                    "mixInputs": {
-                        "I": ("con2", 3),
-                        "Q": ("con2", 4),
-                        "lo_frequency": pars['qubit_LO'],
-                        "mixer": "qubit",
-                    },
-                    "intermediate_frequency": pars['qubit_IF'],
-                    "digitalInputs": {},
-                    "operations": {
-                        "const": "const_pulse_IQ",
-                        "gauss": "gaussian_pulse",
-                        "gauss_4ns": "gaussian_4ns_pulse",
-                        "pi": "pi_pulse1",
-                        "pi_half": "pi_half_pulse1",
-                        "arb_op": "arb_pulse",
-                        "X": "Xpi_pulse",
-                        "Y": "Ypi_pulse",
-                        "X/2": "Xpi_half_pulse",
-                        "Y/2": "Ypi_half_pulse",
-                    },
-                },
-                # "qubit12": {
-                #     "mixInputs": {
-                #         "I": ("con2", 7),
-                #         "Q": ("con1", 8),
-                #         "lo_frequency": pars['qubit_LO'],
-                #         "mixer": "qubit12",
-                #     },
-                #     "intermediate_frequency": pars['qubit12_IF'],
-                #     "digitalInputs": {},
-                #     "operations": {
-                #         "const": "const_pulse_IQ",
-                #         "pi": "pi_pulse12" ,
-                #     },
-                # },
-                "rr": {
-                    "mixInputs": {
-                        "I": ("con2", 1),
-                        "Q": ("con2", 2),
-                        "lo_frequency": pars['rr_LO'],
-                        "mixer": "rr",
-                    },
-                    "intermediate_frequency": pars['rr_IF'],
-                    "outputs": {
-                        "out1": ("con2", 1),
-                        "out2": ("con2", 2),
-                    },
-                    "time_of_flight": pars['tof'], # should be multiple of 4 (at least 24)
-                    "smearing": 40, # adds 40ns of data from each side of raw adc trace to account for ramp up and down of readout pulse
-                    "operations": {
-                        "const": "const_pulse_IQ_rr",
-                        "readout": "ro_pulse1",
-                        # "readout_diss": "ro_pulse1_diss",
-                        "void": "ro_pulse_void",
-                        'ro_pulse_control': "ro_pulse_control",
-                    },
-                },
-                # "ffl": {
-                #     "mixInputs": {
-                #         "I": ("con1", 5),
-                #         "Q": ("con1", 6),
-                #         "lo_frequency": pars['ffl_LO'],
-                #         "mixer": "ffl",
-                #     },
-                #     "intermediate_frequency": pars['ffl_IF'],
-                #     "operations": {
-                #         "const":"const_pulse_IQ_ffl",
-                #         "null":"zero_pulse_IQ_ffl",
-                #         "offset": "offset_pulse_IQ_ffl",
-                #         "gaussian": "gaussian_pulse_ffl",
-                #         "rise": "rise_pulse_IQ_ffl",
-                #         "fall": "fall_pulse_IQ_ffl"
-                #     },
-                # },
-                # "fflqc": {
-                #     "mixInputs": {
-                #         "I": ("con1", 7),
-                #         "Q": ("con1", 8),
-                #         "lo_frequency": pars['fflqc_LO'],
-                #         "mixer": "fflqc",
-                #     },
-                #     "intermediate_frequency": pars['fflqc_IF'],
-                #     "digitalInputs": {},
-                #     "operations": {
-                #         "const":"const_pulse_IQ_ffl",
-                #         "null":"zero_pulse_IQ_ffl",
-                #         "offset": "offset_pulse_IQ_ffl",
-                #         "gaussian": "gaussian_pulse_ffl",
-                    
-                #     },
-                # },
-                
-            },
-
-            "pulses": {
-                "const_pulse_IQ": {
-                    "operation": "control",
-                    "length": 100,
-                    "waveforms": {
-                        "I": "const_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                "const_pulse_IQ_rr": {
-                    "operation": "control",
-                    "length": 100,
-                    "waveforms": {
-                        "I": "const_wf_rr",
-                        "Q": "zero_wf",
-                    },
-                },
-                "const_pulse_IQ_ffl": {
-                    "operation": "control",
-                    "length": 48,
-                    "waveforms": {
-                        "I": "const_wf_ffl",
-                        "Q": "zero_wf",
-                    },
-                },
-                "rise_pulse_IQ_ffl": {
-                    "operation": "control",
-                    "length": 24,
-                    "waveforms": {
-                        "I": "rise_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                "fall_pulse_IQ_ffl": {
-                    "operation": "control",
-                    "length": 24,
-                    "waveforms": {
-                        "I": "fall_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                
-                "offset_pulse_IQ_ffl": {
-                    "operation": "control",
-                    "length": 100,
-                    "waveforms": {
-                        "I": "offset_i_ffl",
-                        "Q": "offset_q_ffl",
-                    },
-                },
-                "zero_pulse_IQ_ffl": {
-                    "operation": "control",
-                    "length": 100,
-                    "waveforms": {
-                        "I": "zero_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                "pi_pulse1": {
-                    "operation": "control",
-                    "length": pars['pi_len'],
-                    "waveforms": {
-                        "I": "pi_wf_i1",
-                        "Q": "pi_wf_q1",
-                    },
-                },
-                "pi_pulse12": {
-                    "operation": "control",
-                    "length": pars['pi_len'],
-                    "waveforms": {
-                        "I": "pi_wf_i1",
-                        "Q": "pi_wf_q1",
-                    },
-                },
-                "Xpi_pulse": {
-                    "operation": "control",
-                    "length": pars['pi_len'],
-                    "waveforms": {
-                        "I": "pi_wf_i1",
-                        "Q": "pi_wf_q1",
-                    },
-                },
-                "Ypi_pulse": {
-                    "operation": "control",
-                    "length": pars['pi_len'],
-                    "waveforms": {
-                        "I": "pi_wf_q1",
-                        "Q": "pi_wf_i1",
-                    },
-                },
-                "Xpi_half_pulse": {
-                    "operation": "control",
-                    "length": pars['pi_half_len'],
-                    "waveforms": {
-                        "I": "pi_half_wf_i1",
-                        "Q": "pi_half_wf_q1",
-                    },
-                },
-                "Ypi_half_pulse": {
-                    "operation": "control",
-                    "length": pars['pi_half_len'],
-                    "waveforms": {
-                        "I": "pi_half_wf_q1",
-                        "Q": "pi_half_wf_i1",
-                    },
-                },
-                "gaussian_pulse": {
-                    "operation": "control",
-                    "length": pars['gauss_len'],
-                    "waveforms": {
-                        "I": "gaussian_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                "gaussian_4ns_pulse": {
-                    "operation": "control",
-                    "length": 16,
-                    "waveforms": {
-                        "I": "gaussian_4ns_wf",
-                        "Q": "zero_wf",
-                    },
-                },
-                "gaussian_pulse_ffl": {
-                    "operation": "control",
-                    "length": pars['gauss_len'],
-                    "waveforms": {                                            #####NOT GAUSSIAN!!!! CHANGE THIS!!!!!!!
-                        "I": "const_wf_ffl",
-                        "Q": "zero_wf",
-                    },
-                },
-                "pi_half_pulse1": {
-                    "operation": "control",
-                    "length": pars['pi_half_len'],
-                    "waveforms": {
-                        "I": "pi_half_wf_i1",
-                        "Q": "pi_half_wf_q1",
-                    },
-                },
-                "ro_pulse1": {
-                    "operation": "measurement",
-                    "length": pars['readout_length'], # in ns (needs to be multiple of 4)
-                    "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
-                    "integration_weights": {
-                        "integW_cos": "integW1_cos",
-                        "integW_sin": "integW1_sin",
-                        "integW_minus_sin": "integW1_minus_sin"
-                    },
-                    "digital_marker": "ON",
-                },
-                
-                # "ro_pulse1_diss": {
-                #     "operation": "measurement",
-                #     "length": pars['readout_length_diss'] , # in ns (needs to be multiple of 4)
-                #     "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
-                #     "integration_weights": {
-                #         "integW_cos_diss": "integW1_cos_diss",
-                #         "integW_sin_diss": "integW1_sin_diss",
-                #         "integW_minus_sin_diss": "integW1_minus_sin_diss"
-                #     },
-                #     "digital_marker": "ON",
-                # },
-                
-                
-                "ro_pulse_control": {
-                    "operation": "control",
-                    "length": 5000, # in ns (needs to be multiple of 4)
-                    "waveforms": {"I": "ro_wf1", "Q": "zero_wf"},
-                },
-                
-                "ro_pulse_void": {
-                    "operation": "measurement",
-                    "length": 32, # in ns (needs to be multiple of 4)
-                    "waveforms": {"I": "zero_wf", "Q": "zero_wf"},
-                    "integration_weights": {
-                        "integW_cos": "integW1_cos",
-                        "integW_sin": "integW1_sin",
-                        "integW_minus_sin": "integW1_minus_sin"
-                    },
-                    "digital_marker": "ON",
-                },
-                
-                "arb_pulse": {
-                    "operation": "control",
-                    "length": 40,
-                    "waveforms": {
-                        "I": "arb_wfm",
-                        "Q": "zero_wf",
-                    },
-                },
-            },
-
-            "waveforms": {
-                "zero_wf": {"type": "constant", "sample": 0.0},
-                "const_wf": {"type": "constant", "sample": pars['amp_q']},
-                "const_wf_rr": {"type": "constant", "sample": pars['amp_r']},
-                "const_wf_ffl": {"type": "constant", "sample": pars['gauss_amp']},
-                "offset_i_ffl": {"type": "constant", "sample": pars['ffl_mixer_offsets_on'][0] - pars['ffl_mixer_offsets'][0]},
-                "offset_q_ffl": {"type": "constant", "sample": pars['ffl_mixer_offsets_on'][1] - pars['ffl_mixer_offsets'][1]},
-                "gaussian_wf_ffl": {"type": "arbitrary", "samples": [float(arg) for arg in pars["gauss_amp"] * gaussian(pars["gauss_len"], pars["gauss_len"]/6)]},
-                "gaussian_wf": {"type": "arbitrary", "samples": [float(arg) for arg in pars['gauss_amp'] * gaussian(pars['gauss_len'], pars['gauss_len']/5)]},
-                "fall_wf": {"type": "arbitrary", "samples": [float(arg) for arg in flattop_gaussian_waveform(pars['gauss_amp'], pars['gauss_len']-48, 24, return_part="fall")]},
-                "rise_wf": {"type": "arbitrary", "samples": [float(arg) for arg in flattop_gaussian_waveform(pars['gauss_amp'], pars['gauss_len']-48, 24, return_part="rise")]},
-                "gaussian_flattop_wf":{"type": "arbitrary", "samples": [float(arg) for arg in flattop_gaussian_waveform(pars['gauss_amp'], pars['gauss_len']-24, 12, return_part="all")]},
-                "gaussian_4ns_wf": {"type": "arbitrary", "samples": gauss_wf_4ns},
-                "ro_wf1": {"type": "constant", "sample": pars['amp_r']},
-                "pi_wf_i1": {"type": "arbitrary", "samples": [float(arg) for arg in pars['pi_amp'] * gaussian(pars['pi_len'], pars['pi_len']/5)]},
-                "pi_wf_q1": {"type": "constant", "sample": 0.0},
-                "pi_half_wf_i1": {"type": "arbitrary", "samples": [float(arg) for arg in pars['pi_half_amp'] * gaussian(pars['pi_half_len'], pars['pi_half_len']/5)]},
-                "pi_half_wf_q1": {"type": "constant", "sample": 0.0},
-                "arb_wfm": {"type": "arbitrary", "samples": [0.2]*10+[0.3]*10+[0.25]*20},
-            },
-
-            "digital_waveforms": {
-                "ON": {"samples": [(1, 0)]},
-                "ONffl":{"samples":[(1, 0)]}
-            },
-
-            "integration_weights": {
-                "integW1_cos": {
-                    "cosine": [(np.cos(pars['IQ_rotation']) , pars['readout_length'])],
-                    "sine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length'])],
-                },
-                "integW1_sin": {
-                    "cosine": [(np.sin(pars['IQ_rotation']) , pars['readout_length'])],
-                    "sine": [(np.cos(pars['IQ_rotation']) , pars['readout_length'])],
-                },
-                "integW1_minus_sin": {
-                    "cosine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length'])],
-                    "sine": [(-np.cos(pars['IQ_rotation']) , pars['readout_length'])],
-                },
-                
-                # "integW1_cos_diss": {
-                #     "cosine": [(np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                #     "sine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                # },
-                # "integW1_sin_diss": {
-                #     "cosine": [(np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                #     "sine": [(np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                # },
-                # "integW1_minus_sin_diss": {
-                #     "cosine": [(-np.sin(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                #     "sine": [(-np.cos(pars['IQ_rotation']) , pars['readout_length_diss'])],
-                # },
-                
-                "integW2_cos": {
-                    "cosine": [1.0] * pars['readout_length'],
-                    "sine": [0.0] * pars['readout_length'],
-                },
-                "integW2_sin": {
-                    "cosine": [0.0] * pars['readout_length'],
-                    "sine": [1.0] * pars['readout_length'],
-                },
-                "integW2_minus_sin": {
-                    "cosine": [0.0] * pars['readout_length'],
-                    "sine": [-1.0] * pars['readout_length'],
-                },
-                # "integW2_cos_diss": {
-                #     "cosine": [1.0] * pars['readout_length_diss'],
-                #     "sine": [0.0] * pars['readout_length_diss'],
-                # },
-                # "integW2_sin_diss": {
-                #     "cosine": [0.0] * pars['readout_length_diss'],
-                #     "sine": [1.0] * pars['readout_length_diss'],
-                # },
-                # "integW2_minus_sin_diss": {
-                #     "cosine": [0.0] * pars['readout_length_diss'],
-                #     "sine": [-1.0] * pars['readout_length_diss'],
-                #     },
-            },
-
-            "mixers": {
-                "qubit": [{"intermediate_frequency": pars['qubit_IF'], "lo_frequency": pars['qubit_LO'], "correction": self.IQ_imbalance(*pars['qubit_mixer_imbalance'])}],
-                "rr": [{"intermediate_frequency": pars['rr_IF'], "lo_frequency": pars['rr_LO'], "correction": self.IQ_imbalance(*pars['rr_mixer_imbalance'])}],
-                # "ffl": [{"intermediate_frequency": pars['ffl_IF'], "lo_frequency": pars['ffl_LO'], "correction": self.IQ_imbalance(*pars['ffl_mixer_imbalance'])}],
-                # "qubit12": [{"intermediate_frequency": pars['qubit12_IF'], "lo_frequency": pars['qubit_LO'], "correction": self.IQ_imbalance(*pars['qubit12_mixer_imbalance'])}],
-                # "fflqc": [{"intermediate_frequency": pars['fflqc_IF'], "lo_frequency": pars['fflqc_LO'], "correction": self.IQ_imbalance(*pars['fflqc_mixer_imbalance'])}],
-            }
-        }
-    # def write_to_config_file(self, path):
 
 #%% GRAVEYARD
 

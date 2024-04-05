@@ -30,7 +30,7 @@ n_avg = 2000
 today = datetime.today()
 sDate =  today.strftime("%Y%m%d")
 bCalibrateRo = True
-saveDir = f'G:\\Shared drives\\CavityCooling\data\\{device}\\{sDate}\\spectroscopy\\diss_spec'
+saveDir = f'G:\\Shared drives\\CavityCooling\DARPA\\data\\{device}\\{sDate}\\resonator_spectroscopy\\rr_spec'
 if not os.path.exists(saveDir):
     Path(saveDir).mkdir(parents=True, exist_ok=True)
 filename = f'dissSpec_amp_q_scale={amp_q_scaling}_DA={qb.pars["rr_atten"]}dB_navg={n_avg}_calibrate={str(bCalibrateRo)}'

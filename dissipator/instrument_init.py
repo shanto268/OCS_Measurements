@@ -123,7 +123,7 @@ def turn_off_ffl_source_meter():
 def set_qb_LO(freq):
     print(f'Setting qubit LO to {round(freq*1e-9,5)} GHz')
     # initialize qubit LO
-    qLO = client.connectToInstrument(qubit_LO_model, dict(name=qubit_LO_name, startup = 'Get config'))
+    qLO = client.connectToInstrument(qubit_LO_model, dict(name=qubit_LO_name, startup = 'Get config', interface='USB'))
     qLO.startInstrument()
     qLO.setValue(qubit_LO_quantity_name['freq'], freq)
     qLO.setValue(qubit_LO_quantity_name['power'], 15)
@@ -131,7 +131,7 @@ def set_qb_LO(freq):
 
 def get_qb_LO():
     # initialize qubit LO
-    qLO = client.connectToInstrument(qubit_LO_model, dict(name=qubit_LO_name, startup = 'Get config'))
+    qLO = client.connectToInstrument(qubit_LO_model, dict(name=qubit_LO_name, startup = 'Get config', interface='USB'))
     qLO.startInstrument()
     return qLO.getValue(qubit_LO_quantity_name['freq'])
 
@@ -239,14 +239,14 @@ def turn_qb_LO_off():
 def set_attenuator(attenuation):
     # initialize digital attenuator
     # attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='24679'))
-    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='usb',address='24680'))
+    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='USB',address='24680'))
     attn.startInstrument()
     attn.setValue('Attenuation',attenuation)
 
 def get_attenuation():
     # initialize digital attenuator
     # attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',address='24679'))
-    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='usb',address='24680'))
+    attn = client.connectToInstrument('Vaunix Lab Brick Digital Attenuator',dict(name='rr atten',interface='USB',address='24680'))
     attn.startInstrument()
     return attn.getValue('Attenuation')
 
