@@ -75,7 +75,7 @@ def resonator_spec_plot(data,qb_pars,fwhm=0,fc=0,iteration=1,**kwargs):
     mag = np.abs(I+1j*Q)
     power=10*np.log10((10**-3)*(mag**2)/50)
 
-    phase = np.unwrap(np.angle(I+1j*Q))
+    phase = np.unwrap(np.angle(I+1j*Q,deg=True),period=360)
     fig = plt.figure(figsize=(10,8))
 
 # Power data
@@ -113,7 +113,7 @@ def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=Tr
     mag = np.abs(I+1j*Q)
     power=convert_V_to_dBm(mag*1e-3)
 
-    phase = np.unwrap(np.angle(I+1j*Q))
+    phase = np.unwrap(np.angle(I+1j*Q,deg=True),period=360)
 
     sigma = np.std(mag)
     print(f'Peak threshold at {np.mean(mag)+2*sigma}')
@@ -163,6 +163,7 @@ def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=Tr
     plt.gcf().text(1, 0.15, txt, fontsize=14)
     # fig.set_title(f'{element} spectroscopy {iteration}')
     plt.tight_layout()
+    plt.show()
 
 #%% init_IQ_plot
 def init_IQ_plot():
@@ -221,16 +222,18 @@ def punchout_plot(data, xlabel = "", ylabel = "", normalize=False,
     I = data['I']
     Q = data['Q']
     z_data = convert_V_to_dBm(np.array(data['mag']))
+    phase = np.unwrap(np.angle(data['z_data'],deg=True),period=360)
     attenuations = data['attenuations']
     chi= freqs[0][np.argmin(z_data[0])] - freqs[0][np.argmin(z_data[-1])]
 
-    print(f'Dispersive shift: {round(0.5*chi/np.pi*1e-3,1)} kHz')
+    print(f'Dispersive shift: {0.5*chi/np.pi*1e9:.1f} kHz')
 
     fig = plt.figure(figsize=(6,5), dpi=300)
     ax1  = fig.add_subplot(6,1,(1,4))
     # if normalize:
     #     cbar_label += ' (normalized)'
-    df = pd.DataFrame(z_data, columns = freqs[0], index = attenuations)
+    # df = pd.DataFrame(z_data, columns = freqs[0], index = attenuations)
+    df = pd.DataFrame(phase, columns = freqs[0], index = attenuations)
     
     if normalize:
         # df = df.apply(lambda x: (x-x.mean())/x.std(), axis = 1)
@@ -244,13 +247,13 @@ def punchout_plot(data, xlabel = "", ylabel = "", normalize=False,
         'shrink':   1.1,
         'location': 'top',
     }
-    kwargs = {
-        'linewidths':  0,
-        # 'xticklabels': np.linspace(min(xdata),max(xdata)+0.5,5),
-        # 'yticklabels': np.linspace(min(ydata),max(ydata)+0.5,5),
-        'vmin':        np.amin(z_data),
-        'vmax':        np.amax(z_data)
-    }
+    # kwargs = {
+    #     'linewidths':  0,
+    #     # 'xticklabels': np.linspace(min(xdata),max(xdata)+0.5,5),
+    #     # 'yticklabels': np.linspace(min(ydata),max(ydata)+0.5,5),
+    #     'vmin':        np.amin(z_data),
+    #     'vmax':        np.amax(z_data)
+    # }
     
     hm = sns.heatmap(df, ax=ax1,cmap = 'seismic', cbar_kws=cbar_options)
     # hm.set_xlabel(xlabel, fontsize=12)
@@ -261,8 +264,10 @@ def punchout_plot(data, xlabel = "", ylabel = "", normalize=False,
     plt.yticks(rotation=0)
     
     ax2 = fig.add_subplot(6,1,(5,6))
-    ax2.plot(freqs[0],z_data[0],'o', markersize = 3, c='b',label=f'$P_r$ = -{attenuations[0]} dB')
-    ax2.plot(freqs[0],z_data[-1],'o', markersize = 3, c='r',label=f'$P_r$ = -{attenuations[-1]} dB')
+    # ax2.plot(freqs[0],z_data[0]/max(z_data[0]),'o', markersize = 3, c='b',label=f'$P_r$ = -{attenuations[0]} dB')
+    # ax2.plot(freqs[0],z_data[-1]/max(z_data[1]),'o', markersize = 3, c='r',label=f'$P_r$ = -{attenuations[-1]} dB')
+    ax2.plot(freqs[0],phase[0],'o', markersize = 3, c='b',label=f'$P_r$ = -{attenuations[0]} dB')
+    ax2.plot(freqs[0],phase[-1],'o', markersize = 3, c='r',label=f'$P_r$ = -{attenuations[-1]} dB')
     ax2.legend()
     ax2.set_xlabel(xlabel, fontsize=12)
     ax2.set_ylabel(cbar_label,fontsize=12)

@@ -38,23 +38,13 @@ class sequence():
         IF_min = self.seq_pars['IF_min']
         IF_max = self.seq_pars['IF_max']
         df = self.seq_pars['df']
-        on_off = self.seq_pars['on_off']
-        freqs = np.arange(IF_min, IF_max + df, df, dtype=int)
+        freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
         res_ringdown_time = self.qb_pars['resettime']['rr']
         print(res_ringdown_time)
         ### QUA code ###
         with program() as prog:
             n, I, Q, f = declare_vars([int, fixed, fixed, int])
             I_st, Q_st, n_stream = declare_streams(stream_num=3)
-            if on_off:
-                I_b, Q_b, I_tot,Q_tot = declare_vars([fixed,fixed, fixed, fixed])
-            # n = declare(int)
-            # I = declare(fixed)
-            # I_st = declare_stream()
-            # Q = declare(fixed)
-            # Q_st = declare_stream()
-            # f = declare(int)
-            # n_stream = declare_stream()
             
             with for_(n, 0, n < n_avg, n + 1):
                 save(n,n_stream)

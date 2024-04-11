@@ -204,7 +204,7 @@ class qubit():
 
         """
         iteration = counter(self._directory,self.experiment,element='rr',extension='*.csv')
-        data = dict(I=[],Q=[],freqs=[],mag=[])
+        data = dict(I=[],Q=[],freqs=[],mag=[],z_data=[])
         data['attenuations'] = attenuations
 
         for a in tqdm(attenuations):
@@ -215,6 +215,7 @@ class qubit():
             data['I'].append(spec_data['I'])
             data['Q'].append(spec_data['Q'])
             data['mag'].append(np.abs(spec_data['I']+1j*spec_data['Q']))
+            data['z_data'].append(spec_data['I']+1j*spec_data['Q'])
 
         self._instruments.set('DA','attenuation',self.pars['readout_atten'])
 
@@ -377,6 +378,7 @@ class qubit():
         iteration = counter(self._directory,self.experiment,element='rr',extension='*.csv')
 
         freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
+        
         self.update_value('rr_LO', value = f_LO)
         seq = sequence(self,'rr_spec',on_off=on_off,n_avg=self.pars['n_avg'], IF_min=IF_min, IF_max=IF_max, df=df,)
         rr_spec = seq.make_resonator_spec_sequence()
@@ -385,8 +387,9 @@ class qubit():
 
         I = np.array(datadict["I"])
         Q = np.array(datadict["Q"])
+        z_data = I + 1j*Q
         freq_arr = np.array(freqs + self.pars['rr_LO'])
-        data = dict(I=I,Q=Q,freqs=freq_arr)
+        data = dict(I=I,Q=Q,z_data=z_data,freqs=freq_arr)
         
         if savedata:
             metadata = {'date/time':    datetime.now(),
