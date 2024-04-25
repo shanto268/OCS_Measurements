@@ -19,19 +19,21 @@ class instruments():
     default_settings =  {   
                 'readout_LO' : 
                     {
-                    'instrument' : 'BNC 845 Signal Generator',
+                    'instrument' : 'SignalCore SC5511A Signal Generator',
                     'frequency' : 'Frequency',
-                    'output' : 'Output',
-                    'Labber_kwargs' :{'name': 'readout LO', 'At Startup': 'Get config', 'Interface':'Other', 'Address':'USB0::0x03EB::0xAFFF::621-03A100000-0520::0::INSTR'}
+                    'output' : 'Output status',
+                    'power': 'Power',
+                    'Labber_kwargs' : {'name' : '10002A06',
+                                       'interface' : 'USB',}
                     },
 
                 'qubit_LO' :
                     {
-                    'instrument' : 'SignalCore SC5506A Signal Generator',
-                    'frequency' : 'RF1 frequency',
-                    'output' : 'RF1 output status',
-                    'power': 'RF1 power level',
-                    'Labber_kwargs' : {'name' : '10002A08',
+                    'instrument' : 'SignalCore SC5511A Signal Generator',
+                    'frequency' : 'Frequency',
+                    'output' : 'Output status',
+                    'power': 'Power',
+                    'Labber_kwargs' : {'name' : '10002F1D',
                                        'interface' : 'USB',}
                     },
 
@@ -51,9 +53,9 @@ class instruments():
                     'instrument' : 'Vaunix Lab Brick Digital Attenuator',
                     'attenuation' : 'Attenuation',
                     'Labber_kwargs' :   {
-                                        'name' : 'readout attenuator',
+                                        'name' : 'rr atten',
                                         'interface' : 'usb',
-                                        'address' : '24680'
+                                        'address' : '26551'
                                         }
                     }, 
 
