@@ -414,15 +414,15 @@ class sequence():
         
     
     
-    def simulate_sequence(self,qb, duration):
-        duration = clk(duration)
-        qmm = QuantumMachinesManager(host=host, port=port)
-        prog = self.make_sequence(qb)
-        job = qmm.simulate(qb.config, prog, SimulationConfig(duration=duration))
-        samples = job.get_simulated_samples()
-        samples.con1.plot()
-        qmm.close_all_quantum_machines()
-        return samples
+        def simulate_sequence(self,qb, duration):
+            duration = clk(duration)
+            qmm = QuantumMachinesManager(host=host, port=port)
+            prog = self.make_sequence(qb)
+            job = qmm.simulate(qb.config, prog, SimulationConfig(duration=duration))
+            samples = job.get_simulated_samples()
+            samples.con1.plot()
+            qmm.close_all_quantum_machines()
+            return samples
 
     
 # def main():
