@@ -34,10 +34,9 @@ from config import Configuration
 from collections import OrderedDict
 
 logger.setLevel(level='WARNING')
-device = 'darpa2A'
+device = 'darpa3A'
 today = date.today()
 sDate =  today.strftime("%Y%m%d")
-saveDir = f'G:\\Shared drives\\CavityCooling\\DARPA\\data\\{device}\\{sDate}'
 
 
 class qubit():
@@ -118,7 +117,7 @@ class qubit():
     #%%% __init__
     def __init__(self, qb, initialize_qmm=True):
         # load pars from json, OR create new json file
-        self.name = qb
+        self._name = qb
         try:
             print('Loading parameter JSON file')
             with open(f'{qb}_pars.json', 'r') as openfile:
@@ -143,13 +142,15 @@ class qubit():
 
         self.init_quantum_machine(initialize_qmm)
         self.write_pars()
-        self._directory = saveDir
+        self._directory = f'G:\\Shared drives\\CavityCooling\\DARPA\\data\\{self._name}'
         self._instruments = instruments()
         self.init_instruments()
         # self.make_config(self.pars)
         self.config_maker = Configuration(self)
         self.config = self.config_maker.make_config()
         # self.make_config(self.pars)
+
+
 
 
 #%% EXPERIMENTS
@@ -326,17 +327,9 @@ class qubit():
             
         
         if savedata:  
-            # save data
-            dataPath = '{saveDir}\spectroscopy\{element}_spec'
-            if not os.path.exists(dataPath):
-                Path(dataPath).mkdir(parents=True, exist_ok=True)
-            with open(f"{dataPath}\data_{iteration:03d}.csv","w") as datafile:
-                writer = csv.writer(datafile)
-                writer.writerow(exp_dict.keys())
-                writer.writerow(exp_dict.values())
-                writer.writerow(freq_arr)
-                writer.writerow(I)
-                writer.writerow(Q)
+            dataPath = f'{self._directory}\{self.experiment}\\rr'
+            data = {"I": I, "Q": Q, "freqs": freq_arr}
+            save_data(dataPath, iteration, self.pars, data)
 
         data = dict(I=np.array(I),Q=np.array(Q),freqs=np.array(freq_arr))
 
@@ -392,17 +385,9 @@ class qubit():
         data = dict(I=I,Q=Q,z_data=z_data,freqs=freq_arr)
         
         if savedata:
-            metadata = {'date/time':    datetime.now(),
-                     'nAverages': self.pars['n_avg'],
-                             'w_LO': self.pars['rr_LO'],
-                 'wait_period':  self.pars['resettime']['rr'],
-                 }
-            dataPath = f'{saveDir}\{self.experiment}\\rr'
+            dataPath = f'{self._directory}\{self.experiment}\\rr'
             data = {"I": I, "Q": Q, "freqs": freq_arr}
-            
-            save_data(dataPath, iteration, metadata, data)
-      
-
+            save_data(dataPath, iteration, self.pars, data)
 
         return data, job
 
@@ -2209,7 +2194,7 @@ class qubit():
 
     #%%%% write_pars
     def write_pars(self):
-        with open(f'{self.name}_pars.json', "w") as outfile:
+        with open(f'{self._name}_pars.json', "w") as outfile:
             json.dump(self.pars, outfile)
 
     #%%%% remove_key

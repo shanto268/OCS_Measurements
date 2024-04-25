@@ -40,18 +40,26 @@ class sequence():
         df = self.seq_pars['df']
         freqs = np.arange(IF_min, IF_max + df/2, df, dtype=int)
         res_ringdown_time = self.qb_pars['resettime']['rr']
-        print(res_ringdown_time)
+        tof_in_us = self.qb_pars['tof'] * 1e-3
+        IQ_rotation = self.qb_pars['IQ_rotation']
+        phase_prefactor = tof_in_us * 0.000064 # 0.000064 = 2^6 * 1e-6, to compensate for right-bitshift by 6 bits
+        initial_frame_rotation = self.qb_pars['tof'] * IF_min/1e9
         ### QUA code ###
         with program() as prog:
             n, I, Q, f = declare_vars([int, fixed, fixed, int])
             I_st, Q_st, n_stream = declare_streams(stream_num=3)
-            
+            phase_shift = declare(fixed)
+            df = declare(int, value=int(df))
+
             with for_(n, 0, n < n_avg, n + 1):
                 save(n,n_stream)
                 reset_frame('rr')
+                frame_rotation_2pi(IQ_rotation + initial_frame_rotation,'rr')
                 # with for_each_(f, freqs_list):
                 with for_(*from_array(f, freqs)):
-                    update_frequency("rr", f)
+                    update_frequency("rr", f,keep_phase=False)
+                    assign(phase_shift, Cast.mul_fixed_by_int(phase_prefactor, (df>>6)))
+                    frame_rotation_2pi(phase_shift,'rr')
                     wait(res_ringdown_time, "rr")
                     measure("readout", "rr", None,*res_demod(I, Q,switch_weights=False))
                     save(I, I_st)
@@ -116,6 +124,10 @@ class sequence():
                 n_stream.save('n')
 
         return prog
+    
+    def make_power_rabi_sequence(self,):
+
+        
         
             # if self.name == 'ringdown_drive_on':
             # tmin = clk(tmin)
@@ -411,15 +423,16 @@ class sequence():
         samples.con1.plot()
         qmm.close_all_quantum_machines()
         return samples
+
     
-def main():
-    qb = dissipator('diss08_11a',device_name='diss08_11a')
+# def main():
+    # qb = dissipator('diss08_11a',device_name='diss08_11a')
     # qb.update_value('ffl_freq', 3.07e9)
     # qb.update_value('ffl_IF', 350e6)
     # qb.update_value('ffl_LO', qb.pars['ffl_freq'] - qb.pars['ffl_IF'])
     #qb.update_value('rr_pulse_len_in_clk', 20)
-    seq = sequence('qb-reset', IF_min=45e6,IF_max=54e6,df=0.1e6, res_ringdown_time=int(40))
-    samples = seq.simulate_sequence(qb, duration=3000)
+    # seq = sequence('qb-reset', IF_min=45e6,IF_max=54e6,df=0.1e6, res_ringdown_time=int(40))
+    # samples = seq.simulate_sequence(qb, duration=3000)
     #qb.update_value('rr_pulse_len_in_clk', 500)
     
 if __name__ == "__main__":
