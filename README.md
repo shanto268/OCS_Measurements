@@ -1,5 +1,25 @@
 # Measurement Scripts for the OCS QP Project:
 
+This contains code to run on the Sneezy fridge and node.
+
+## Hardware Setup:
+
+### Fridge Diagram:
+
+![fridge](fridge.png)
+
+### Room Temperature Electronics:
+
+![rte](rte.png)
+
+#### Equipment Used:
+
+```json
+
+```
+
+---
+
 ## Measurement Checklist:
 
 - [x] Resonator spectroscopy
@@ -13,3 +33,5 @@
 - [ ] basic qubit characterization (T1,T2R,T2E) [OPTIONAL]
 
 ## Deployment Instructions:
+
+We are using
