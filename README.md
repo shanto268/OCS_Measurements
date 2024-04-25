@@ -1,28 +1,15 @@
-# README #
+# Measurement Scripts for the OCS QP Project:
 
-This README would normally document whatever steps are necessary to get your application up and running.
+## Measurement Checklist:
 
-### What is this repository for? ###
+- [x] Resonator spectroscopy
+- [x] Punchout
+- [ ] qubit spectroscopy over broad range to detect higher order frequencies (up to w_03)
+- [ ] Resonator spectroscopy (high averages, small span) at res freqs
+- [ ] Single shot measurement of resonator at res freq for histogram (goal: see two peaks)
+- [ ] Ramsey interference measurement to determine the instantaneous n_g
+- [ ] Single-shot readout of charge parity
+- [ ] Charge parity dynamics timeseries measurement
+- [ ] basic qubit characterization (T1,T2R,T2E) [OPTIONAL]
 
-* measurements for the dissipator project
-
-### measurement configuration
-
-### list of measurements ###
-
-* dissipator T1
-* logical qubit T2 with and without FFL
-* cavity ring down time sweeping FFL drive amplitude and readout pulse amplitude
-* cavity ring-down time as a function of FFL drive frequency (and with FFL drive frequency deliberately off-calibrated)
-* photon-number resolved spectroscopy
-
-### Contribution guidelines ###
-
-* Writing tests
-* Code review
-* Other guidelines
-
-### Who do I talk to? ###
-
-* Repo owner or admin
-* Other community or team contact
+## Deployment Instructions:
