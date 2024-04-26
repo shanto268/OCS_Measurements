@@ -548,13 +548,14 @@ class qubit():
 
         if savedata:
             exp_dict = {
-                       'n_avg': n_avg,
-                        'amp_r_scale': amp_r_scaling,
-                        'amp_r_scale': amp_q_scaling ,
-                        'rr_atten': inst.get_attenuation(),
+                       'n_avg': self.pars["n_avg"],
+                       'amp_r': self.pars["amp_r"],
+                       'amp_q': self.pars["amp_q"],
+                        'readout_atten': self.pars["readout_atten"],
                          'qubit_LO': self.pars['qubit_LO'],
                     }
             # save data
+            saveDir = self._directory
             dataPath = f'{saveDir}\\spectroscopy\qubit_spec'
             if not os.path.exists(dataPath):
                 Path(dataPath).mkdir(parents=True, exist_ok=True)

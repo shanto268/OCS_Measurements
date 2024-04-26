@@ -107,8 +107,8 @@ def resonator_spec_plot(data,qb_pars,fwhm=0,fc=0,iteration=1,**kwargs):
     # fig.set_title(f'{element} spectroscopy {iteration}')
     plt.tight_layout()
 
-def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=True, amp_q_scaling=1,**kwargs):
-
+def qubit_spec_plot_v0(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=True, amp_q_scaling=1,**kwargs):
+    
 
     freq = data['freqs']*1e-9
     df = freq[1]-freq[0]
@@ -169,6 +169,61 @@ def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=Tr
     plt.tight_layout()
     plt.show()
   
+def qubit_spec_plot(data, qb_pars, qb_power=0, rr_power=0, iteration=1, find_peaks=True, amp_q_scaling=1, **kwargs):
+    freq = data['freqs'] * 1e-9
+    df = freq[1] - freq[0]
+    I = data['I'] * 1e3
+    Q = data['Q'] * 1e3
+    mag = np.abs(I + 1j * Q)
+    power = convert_V_to_dBm(mag * 1e-3)
+
+    phase = np.unwrap(np.angle(I + 1j * Q, deg=True), period=360)
+
+    sigma = np.std(mag)
+    print(f'Peak threshold at {np.mean(mag) + 2 * sigma}')
+    peaks, _ = scy.signal.find_peaks(mag, height=np.mean(mag) + 2 * sigma, distance=200, width=3)
+    try:
+        for i in peaks:
+            print(f'Peaks at: {round(freq[i], 5)} GHz\n')
+    except:
+        print('Peaks not found or do not exist.')
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 12), sharex=True)
+
+    # Power data
+    ax1.plot(freq, mag, '-o', markersize=3, c='C0')
+    ax1.set_xlabel('Frequency (GHz)')
+    ax1.set_ylabel('Magnitude (mV)')
+    ax1.xaxis.set_tick_params(which='both', labelbottom=True)
+
+    # Phase data
+    ax2.plot(freq, phase, '-o', markersize=3, c='C0')
+    ax2.set_xlabel('Frequency (GHz)')
+    ax2.set_ylabel('Phase (deg)')
+    ax2.xaxis.set_tick_params(which='both', labelbottom=True)
+
+    # Additional subplot on the bottom row
+    ax3.plot(freq, I, '-o', markersize=3, c='r', label='I')
+    ax3.plot(freq, Q, '-o', markersize=3, c='b', label='Q')
+    ax3.set_xlabel('Frequency (GHz)')
+    ax3.set_ylabel('Voltage (mV)')
+    ax3.xaxis.set_tick_params(which='both', labelbottom=True)
+    ax3.legend(loc='best')
+
+    if len(peaks) == 2:
+        txt = '$\omega_{01}$ = %.4f GHz\n$\omega_{02}$/2 = %.4f GHz\n$\\alpha$ = %.1f MHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz' % (
+            freq[peaks[1]], freq[peaks[0]], (freq[peaks[0]] - freq[peaks[1]]) * 1e3, qb_power, rr_power,
+            qb_pars['rr_freq'] * 1e-9)
+    elif len(peaks) == 1:
+        txt = '$\omega_{01}$ = %.4f GHz\n$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz' % (
+            freq[peaks[0]], qb_power, rr_power, qb_pars['rr_freq'] * 1e-9)
+    else:
+        txt = '$P_{qb}$ = %.1f dBm\n$P_r$ = %.1f dBm\n$\omega_r$ = %.4f GHz\n$amp_q$ = %.5f' % (
+            qb_power, rr_power, qb_pars['rr_freq'] * 1e-9, amp_q_scaling)
+
+    plt.gcf().text(1, 0.15, txt, fontsize=14)
+    plt.tight_layout()
+    plt.show()
 
 #%% init_IQ_plot
 def init_IQ_plot():
