@@ -4,14 +4,14 @@ Created on Fri Apr 28 13:00:18 2023
 
 @author: lfl
 """
-from qm.qua import *
-from qualang_tools.loops import from_array
-from qm import LoopbackInterface
-from qm.QuantumMachinesManager import QuantumMachinesManager
-from qm import SimulationConfig
 import numpy as np
+from qm import LoopbackInterface, SimulationConfig
+from qm.qua import *
+from qm.QuantumMachinesManager import QuantumMachinesManager
+from qualang_tools.loops import from_array
+
+from helper_functions import declare_streams, declare_vars, res_demod
 from Utilities import clk
-from helper_functions import res_demod, declare_vars, declare_streams
 
 
 class sequence():
@@ -33,7 +33,6 @@ class sequence():
         
 
     def make_resonator_spec_sequence(self):
-        
         n_avg = self.qb_pars['n_avg']
         IF_min = self.seq_pars['IF_min']
         IF_max = self.seq_pars['IF_max']
