@@ -1,9 +1,11 @@
-from qm.qua import dual_demod, declare, declare_stream
-import h5py
-import os
-from pathlib import Path
 import json
+import os
 from datetime import datetime
+from pathlib import Path
+
+import h5py
+from qm.qua import declare, declare_stream, dual_demod
+
 
 def datetime_converter(o):
     if isinstance(o, datetime):

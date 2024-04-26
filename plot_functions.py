@@ -4,27 +4,31 @@ Created on Mon May 24 13:13:39 2021
 
 @author: Evangelos Vlachos <evlachos@usc.edu>
 """
+# from matplotlib import cm
+import csv
+import itertools
+import os
+import time
+from json import loads
+# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# from matplotlib.colors import LightSource
+from types import SimpleNamespace
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy as sp
 import scipy as scy
-# from matplotlib import cm
-import csv
-import itertools
-from scipy.interpolate import interp1d
 import scipy.fftpack
-import time
-import os
-from json import loads
-# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-# from matplotlib.colors import LightSource
-from types import SimpleNamespace
+from scipy.interpolate import interp1d
+
 pi=np.pi
 import seaborn as sns; sns.set() # styling
 from matplotlib.ticker import FormatStrFormatter
+from scipy.signal import butter, find_peaks, freqz, lfilter, peak_widths
+
 from Utilities import convert_V_to_dBm
-from scipy.signal import butter,lfilter,freqz,find_peaks,peak_widths
+
 # import imageio
 
 # set some deafault
@@ -164,6 +168,7 @@ def qubit_spec_plot(data,qb_pars,qb_power=0,rr_power=0,iteration=1,find_peaks=Tr
     # fig.set_title(f'{element} spectroscopy {iteration}')
     plt.tight_layout()
     plt.show()
+  
 
 #%% init_IQ_plot
 def init_IQ_plot():

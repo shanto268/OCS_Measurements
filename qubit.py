@@ -3,38 +3,37 @@ Created on Mon Oct 4 2022
 
 @author: Evangelos Vlachos <evlachos@usc.edu>
 """
-from scipy.signal.windows import gaussian
-from scipy.signal import savgol_filter
-# from waveform_tools import *
-from qm import generate_qua_script
-from qm.qua import *
-from qm import LoopbackInterface
-from qm.QuantumMachinesManager import QuantumMachinesManager
-from qm import SimulationConfig
-import plot_functions as pf
-import os
-from datetime import datetime
 import csv
 import glob
-import time
-import numpy as np
 import json
-from qualang_tools.loops import from_array
-from qualang_tools.analysis.discriminator import two_state_discriminator
-from qm.logger import logger
-from Utilities import *
-from datetime import date
-from pathlib import Path
-from helper_functions import save_data
+import os
+import time
 import warnings
-import matplotlib.pyplot as plt
-from sequence import *
-from Instruments import instruments
-from config import Configuration
 from collections import OrderedDict
+from datetime import date, datetime
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+# from waveform_tools import *
+from qm import LoopbackInterface, SimulationConfig, generate_qua_script
+from qm.logger import logger
+from qm.qua import *
+from qm.QuantumMachinesManager import QuantumMachinesManager
+from qualang_tools.analysis.discriminator import two_state_discriminator
+from qualang_tools.loops import from_array
+from scipy.signal import savgol_filter
+from scipy.signal.windows import gaussian
+
+import plot_functions as pf
+from config import Configuration
+from helper_functions import save_data
+from Instruments import instruments
+from sequence import *
+from Utilities import *
 
 logger.setLevel(level='WARNING')
-device = 'darpa3A'
+device = 'ocsqp1'
 today = date.today()
 sDate =  today.strftime("%Y%m%d")
 
@@ -58,7 +57,7 @@ class qubit():
                     'Iin':                          1,          # OPX input (comes from demodulation mixer output I)
                     'Qin':                          2,          # OPX input (comes from demodulation mixer output Q)
                     'AWG_trigger_out' :                     1,          # OPX digital marker output port for triggering AWG
-                    'controller':                   'con2',     # OPX controller name
+                    'controller':                   'con1',     # OPX controller name
 
                     # Instrument settings (except OPX)
                     "qubit_LO":                     int(4.48e9),
@@ -142,7 +141,7 @@ class qubit():
 
         self.init_quantum_machine(initialize_qmm)
         self.write_pars()
-        self._directory = f'G:\\Shared drives\\CavityCooling\\DARPA\\data\\{self._name}'
+        self._directory = f'G:\\Shared drives\\Quasiparticles\\OCS_QP\data\\{self._name}'
         self._instruments = instruments()
         self.init_instruments()
         # self.make_config(self.pars)
@@ -296,6 +295,7 @@ class qubit():
                                                         showprogress=showprogress,
                                                         IF_min=df,IF_max=chunksize,df=df,
                                                         savedata=False)
+                pf.qubit_spec_plot(data,qb_pars=self.pars,find_peaks=True, amp_q_scaling=amp_q_scaling)
             # elif element == 'fflqb':
             #     dataI, dataQ,freqs, job = self.fflt1_spec(spec='qb',f_LO=f, 
             #                                             IF_min=df,IF_max=chunksize,df=df,
@@ -518,11 +518,11 @@ class qubit():
 
         if check_mixers:
             self.opt_lo_leakage(mode='coarse',element='qubit',sa_span=0.5e6,threshold=-30,plot=True)
-            self.update_value('qubit_IF',50e6)
-            self.opt_sideband(mode='coarse',element='qubit',sa_span=0.5e6,threshold=-20,plot=True)
-            self.opt_lo_leakage(mode='coarse',element='rr',sa_span=0.5e6,threshold=-30,plot=True)
-            self.update_value('rr_IF',50e6)
-            self.opt_sideband(mode='coarse',element='rr',sa_span=0.5e6,threshold=-20,plot=True)
+           #self.update_value('qubit_IF',50e6)
+            #self.opt_sideband(mode='coarse',element='qubit',sa_span=0.5e6,threshold=-20,plot=True)
+           # self.opt_lo_leakage(mode='coarse',element='rr',sa_span=0.5e6,threshold=-30,plot=True)
+           # self.update_value('rr_IF',50e6)
+           # self.opt_sideband(mode='coarse',element='rr',sa_span=0.5e6,threshold=-20,plot=True)
 
         # prog = self.make_sequence(self,on_off=on_off,saturation_dur=saturation_dur,amp_q_scaling=amp_q_scaling, IF_min=IF_min, IF_max=IF_max, df=df,)
         
@@ -542,6 +542,7 @@ class qubit():
         freq_arr = np.array(freq_arr + self.pars['qubit_LO'])
         data = dict(I=I,Q=Q,freqs=freq_arr)
 
+        
         
         # print(f'Qubit Frequency: {fc*1e-9:.5f} GHz\nFWHM = {fwhm*1e-6} MHz\nkappa = {2*np.pi*fwhm*1e-6:.3f} MHz')
 
@@ -1564,7 +1565,7 @@ class qubit():
         with program() as tof_cal:
             n = declare(int)
             adc_st = declare_stream(adc_trace=True)
-            update_frequency('rr',self.pars['rr_IF'])
+            update_frequency('rr',5e6)
             with for_(n, 0, n < self.pars['n_avg'], n + 1):
                 reset_phase("rr")
                 measure("readout", "rr", adc_st)

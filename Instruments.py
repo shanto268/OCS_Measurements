@@ -8,8 +8,7 @@ Uses the Labber Python API; see documentation at https://www.keysight.com/us/en/
 """
 
 import sys, os
-# from VISAdrivers.sa_api import *
-sys.path.append("E:\Program Files\Keysight\Labber\Script")
+sys.path.append("C:\Program Files\Keysight\Labber\Script")
 import Labber
 import json
 
